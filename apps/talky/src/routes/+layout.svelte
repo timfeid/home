@@ -7,9 +7,21 @@
 	import { dev } from '$app/environment';
 	import { injectSpeedInsights } from '@vercel/speed-insights/sveltekit';
 	import { Portal } from 'bits-ui';
+	import type { Procedures } from '@feid/bindings';
+	import { onMount } from 'svelte';
+	import { client } from '../lib/client';
+	import { user } from '../lib/user.svelte';
 
 	injectSpeedInsights();
 	injectAnalytics({ mode: dev ? 'development' : 'production' });
+
+	onMount(async () => {
+		const response = await client.auth_login.mutate({ username: 'tim', password: 'wat' });
+		if (response.status !== 'ok') {
+			return;
+		}
+		user.accessToken = response.data.access_token;
+	});
 
 	let { children } = $props();
 </script>
@@ -22,6 +34,7 @@
 		rel="stylesheet"
 	/>
 </svelte:head>
+<!-- <RspcProvider /> -->
 
 <div class="relative flex min-h-screen w-full flex-col">
 	<header

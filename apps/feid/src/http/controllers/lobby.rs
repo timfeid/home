@@ -27,6 +27,12 @@ use crate::{
 
 pub struct LobbyController {}
 
+#[derive(Type, Serialize, Deserialize)]
+pub struct LobbySubscribeArgs {
+    join_code: String,
+    access_token: String,
+}
+
 impl LobbyController {
     pub async fn create(ctx: Ctx, _: ()) -> AppResult<LobbyData> {
         let user = ctx.required_user()?;
@@ -56,14 +62,15 @@ impl LobbyController {
 
     pub async fn subscribe(
         ctx: Ctx,
-        join_code: String,
+        subscribe_args: LobbySubscribeArgs,
     ) -> AppResult<impl Stream<Item = AppResult<LobbyData>> + Send + 'static> {
         let manager = Arc::clone(&ctx.lobby_manager);
-        let user_claims = ctx.required_user()?;
-        let claims = user_claims.clone();
+        let user_claims = JwtService::decode(&subscribe_args.access_token)
+            .unwrap()
+            .claims;
 
         Ok(async_stream::stream! {
-            match manager.subscribe_to_lobby_updates(join_code, claims).await {
+            match manager.subscribe_to_lobby_updates(subscribe_args.join_code, user_claims).await {
                 Ok(mut post_stream) => {
                     println!("Subscribed to lobby updates");
                     pin_mut!(post_stream);

@@ -3,12 +3,12 @@
 
 export type LobbyChat = { user_id: string; message: string }
 
-export type ProceduresLegacy = { queries: { key: "auth_refresh_token"; input: string; result: { access_token: string | null; refresh_token: string | null; success: boolean } }; mutations: { key: "auth_login"; input: { username: string; password: string }; result: { access_token: string | null; refresh_token: string | null; success: boolean } } | { key: "lobby_create"; input: null; result: { join_code: string; chat: LobbyChat[] } } | { key: "lobby_join"; input: string; result: null }; subscriptions: { key: "lobby_subscribe"; input: string; result: { join_code: string; chat: LobbyChat[] } } }
+export type ProceduresLegacy = { queries: { key: "auth_refresh_token"; input: string; result: { access_token: string; refresh_token: string } }; mutations: { key: "auth_login"; input: { username: string; password: string }; result: { access_token: string; refresh_token: string } } | { key: "lobby_create"; input: null; result: { join_code: string; chat: LobbyChat[] } } | { key: "lobby_join"; input: string; result: null }; subscriptions: { key: "lobby_subscribe"; input: { join_code: string; access_token: string }; result: { join_code: string; chat: LobbyChat[] } } }
 
 export type Procedures = {
-	auth_login: { kind: "mutation", input: { username: string; password: string }, output: { access_token: string | null; refresh_token: string | null; success: boolean }, error: unknown },
-	auth_refresh_token: { kind: "query", input: string, output: { access_token: string | null; refresh_token: string | null; success: boolean }, error: unknown },
+	auth_login: { kind: "mutation", input: { username: string; password: string }, output: { access_token: string; refresh_token: string }, error: unknown },
+	auth_refresh_token: { kind: "query", input: string, output: { access_token: string; refresh_token: string }, error: unknown },
 	lobby_create: { kind: "mutation", input: null, output: { join_code: string; chat: LobbyChat[] }, error: unknown },
 	lobby_join: { kind: "mutation", input: string, output: null, error: unknown },
-	lobby_subscribe: { kind: "subscription", input: string, output: { join_code: string; chat: LobbyChat[] }, error: unknown },
+	lobby_subscribe: { kind: "subscription", input: { join_code: string; access_token: string }, output: { join_code: string; chat: LobbyChat[] }, error: unknown },
 }

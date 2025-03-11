@@ -18,11 +18,17 @@ pub struct Ctx {
 
 impl Ctx {
     pub fn new(pool: Arc<Pool<Postgres>>, parts: Parts, lobby_manager: Arc<LobbyManager>) -> Ctx {
-        // println!("{:?}", parts.headers);
         let user = match parts.headers.get("Authorization") {
-            Some(bearer) => JwtService::decode(bearer.to_str().unwrap_or_default())
-                .and_then(|r| Ok(r.claims))
-                .ok(),
+            Some(header_value) => {
+                let token_str = header_value.to_str().unwrap_or_default();
+                let token = if token_str.to_lowercase().starts_with("bearer ") {
+                    &token_str[7..]
+                } else {
+                    token_str
+                };
+
+                JwtService::decode(token).map(|r| r.claims).ok()
+            }
             None => None,
         };
 
