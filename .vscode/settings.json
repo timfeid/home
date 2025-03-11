@@ -1,0 +1,35 @@
+{
+  "editor.formatOnSave": true,
+  "editor.quickSuggestions": {
+    "strings": true
+  },
+  "eslint.probe": [
+    "javascript",
+    "typescript",
+    "html",
+    "markdown",
+    "svelte"
+  ],
+  "prettier.singleQuote": true,
+  "prettier.jsxSingleQuote": true,
+  "css.lint.unknownAtRules": "ignore",
+  "files.exclude": {
+    "**/build": true,
+    "**/dist": true,
+    "**/node_modules": true,
+    "**/.vercel": true,
+    ".pulumi": true,
+    "**/.DS_Store": true,
+    "**/.git": true,
+    "**/.hg": true,
+    "**/.svn": true,
+    "**/.next": true,
+    "**/CVS": true,
+    "**/Thumbs.db": true,
+    "**/.svelte-kit": true,
+    "**/.netlify": true,
+    "**/.yarn": true,
+    "target": true
+  },
+  "rust-analyzer.showUnlinkedFileNotification": false
+}
