@@ -33,31 +33,58 @@ pub struct LobbySubscribeArgs {
     access_token: String,
 }
 
+#[derive(Type, Deserialize, Serialize, Debug, Clone)]
+pub struct Member {
+    name: String,
+    user_id: String,
+    avatar: Option<String>,
+    color: Option<String>,
+}
+
+#[derive(Type, Deserialize, Serialize, Debug, Clone)]
+pub struct MemberList {
+    name: String,
+    members: Vec<Member>,
+}
+
+#[derive(Type, Deserialize, Serialize, Debug, Clone)]
+pub struct LobbyResponse {
+    join_code: String,
+    member_list: Vec<MemberList>,
+}
+impl LobbyResponse {
+    fn from_join_code(code: &str) -> LobbyResponse {
+        LobbyResponse {
+            join_code: code.to_string(),
+            member_list: vec![MemberList {
+                name: "hello".to_string(),
+                members: vec![Member {
+                    name: "dazed".to_string(),
+                    user_id: "tim".to_string(),
+                    avatar: None,
+                    color: None,
+                }],
+            }],
+        }
+    }
+}
+
 impl LobbyController {
-    pub async fn create(ctx: Ctx, _: ()) -> AppResult<LobbyData> {
+    pub async fn create(ctx: Ctx, _: ()) -> AppResult<LobbyResponse> {
         let user = ctx.required_user()?;
         let code = ctx.lobby_manager.create_lobby(user).await?;
-        let lobby = ctx
-            .lobby_manager
-            .get_lobby(&code)
-            .await
-            .map_err(|x| AppError::BadRequest("No such lobby".to_string()))?;
-        let data = lobby.lock().await.data.clone();
 
-        let lobby_manager = ctx.lobby_manager.clone();
-        lobby_manager.notify_lobby(&code).await.ok();
-
-        Ok(data)
+        Ok(LobbyResponse::from_join_code(&code))
     }
 
-    pub async fn join(ctx: Ctx, join_code: String) -> AppResult<()> {
+    pub async fn join(ctx: Ctx, join_code: String) -> AppResult<LobbyResponse> {
         let user = ctx.required_user()?;
         ctx.lobby_manager
             .join_lobby(&join_code, user)
             .await
             .ok_or(AppError::BadRequest("Bad lobby id".to_string()))?;
 
-        Ok(())
+        Ok(LobbyResponse::from_join_code(&join_code))
     }
 
     pub async fn subscribe(
@@ -81,6 +108,7 @@ impl LobbyController {
                 }
                 Err(e) => {
                     eprintln!("Error subscribing to lobby updates: {:?}", e);
+                    yield Err(e)
                 }
             }
         })

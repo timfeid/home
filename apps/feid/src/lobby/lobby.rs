@@ -17,18 +17,19 @@ impl LobbyChat {
 }
 
 #[derive(Type, Deserialize, Serialize, Debug, Clone)]
+pub struct PresenceMember {
+    pub user_id: String,
+    pub last_seen: u32,
+}
+
+#[derive(Type, Deserialize, Serialize, Debug, Clone)]
 pub struct LobbyData {
-    pub join_code: String,
-    pub chat: Vec<LobbyChat>,
+    pub presence: HashMap<String, PresenceMember>,
 }
 impl Default for LobbyData {
     fn default() -> LobbyData {
-        let code = ulid::Ulid::new().to_string();
-        // game_state.code = code.clone();
-
         LobbyData {
-            join_code: code,
-            chat: vec![],
+            presence: HashMap::new(),
         }
     }
 }
@@ -80,10 +81,10 @@ impl Lobby {
         self
     }
 
-    pub fn message(&mut self, user: &Claims, message: String) -> &mut Self {
-        self.data
-            .chat
-            .push(LobbyChat::new(user.sub.clone(), message));
+    pub fn typing(&mut self, user: &Claims, message: String) -> &mut Self {
+        // self.data
+        //     .chat
+        //     .push(LobbyChat::new(user.sub.clone(), message));
 
         self
     }
@@ -110,11 +111,11 @@ mod test {
         };
         let lobby = &Rc::new(RefCell::new(Lobby::new(&user_id).await));
 
-        lobby
-            .clone()
-            .borrow_mut()
-            .join(&user_id2)
-            .await
-            .message(&user_id2, "test".to_string());
+        // lobby
+        //     .clone()
+        //     .borrow_mut()
+        //     .join(&user_id2)
+        //     .await
+        //     .message(&user_id2, "test".to_string());
     }
 }

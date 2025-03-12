@@ -6,18 +6,21 @@
 	import { Client } from '@rspc/client';
 	import { user } from '../../../user.svelte';
 	import Button from '../../ui/button/button.svelte';
+	import Layout from './layout.svelte';
+	import type { LobbyData, LobbyPresenceData } from './lobby';
 
 	let { joinCode }: { joinCode: string } = $props();
-	let lobby: undefined | Procedures['lobby_subscribe']['output'] = $state(undefined);
+	let presence: undefined | LobbyPresenceData = $state(undefined);
+	let lobby: undefined | LobbyData = $state(undefined);
 	let unsubscribe: () => void | undefined;
 
-	function onData(data: Procedures['lobby_subscribe']['output']) {
+	function onData(data: LobbyPresenceData) {
 		console.log('got data', data);
-		lobby = data;
+		presence = data;
 	}
 
 	async function getLobby(joinCode: string) {
-		lobby = undefined;
+		presence = undefined;
 		if (unsubscribe) {
 			unsubscribe();
 		}
@@ -37,6 +40,7 @@
 
 	onMount(() => {
 		getLobby(joinCode);
+		doSomething();
 	});
 
 	onDestroy(() => {
@@ -54,7 +58,9 @@
 		if (response.status !== 'ok') {
 			return;
 		}
-		// console.log(response);
+
+		lobby = response.data;
+		console.log(response);
 	}
 </script>
 
@@ -62,4 +68,8 @@
 
 <Button onclick={doSomething}></Button>
 
-{JSON.stringify(lobby)}
+{JSON.stringify(presence)}
+
+{#if lobby}
+	<Layout {lobby} {presence}></Layout>
+{/if}

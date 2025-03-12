@@ -50,6 +50,7 @@
 	"dependencies": {
 		"@vercel/analytics": "^1.4.1",
 		"@vercel/speed-insights": "^1.1.0",
-		"jose": "^6.0.9"
+		"jose": "^6.0.9",
+		"lucide-svelte": "^0.479.0"
 	}
 }
