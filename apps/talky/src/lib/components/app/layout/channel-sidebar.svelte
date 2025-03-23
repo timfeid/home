@@ -1,13 +1,27 @@
 <script lang="ts">
-	export let activeChannel: number;
-	export let setActiveChannel: (index: number) => void;
-	export let onClose: () => void;
-
-	// Import Svelte icon components (assumes lucide-svelte)
-	import { ChevronDown, Hash, Volume2, Settings, X, Users, Plus } from 'lucide-svelte';
+	import {
+		ChevronDown,
+		Hash,
+		Volume2,
+		Settings,
+		X,
+		Users,
+		Plus,
+		MicVocal,
+		MicOff,
+	} from 'lucide-svelte';
 	import ScrollArea from '../../ui/scroll-area/scroll-area.svelte';
 	import { Avatar, AvatarFallback, AvatarImage } from '../../ui/avatar';
 	import { cn } from '../../../utils';
+	import { Button } from '../../ui/button';
+	import { pushToTalkEnd, pushToTalkStart } from '../../../tauri';
+
+	// let
+	// export let activeChannel: number;
+	// export let setActiveChannel: (index: number) => void;
+	// export let onClose: () => void;
+
+	// Import Svelte icon components (assumes lucide-svelte)
 
 	// Local state for expanded/collapsed categories
 	let expandedCategories = {
@@ -17,6 +31,17 @@
 
 	function toggleCategory(category: string) {
 		expandedCategories = { ...expandedCategories, [category]: !expandedCategories[category] };
+	}
+
+	let recording = $state(false);
+	function toggle() {
+		if (recording) {
+			recording = false;
+			pushToTalkEnd();
+		} else {
+			recording = true;
+			pushToTalkStart();
+		}
 	}
 
 	// Data arrays for channels
@@ -38,9 +63,9 @@
 	<!-- Header -->
 	<div class="flex h-12 items-center justify-between border-b border-[#202225] px-4 shadow-sm">
 		<h2 class="truncate font-semibold text-white">Coding Server</h2>
-		<button on:click={onClose} class="text-gray-400 hover:text-white md:hidden">
+		<!-- <button on:click={onClose} class="text-gray-400 hover:text-white md:hidden">
 			<X class="h-5 w-5" />
-		</button>
+		</button> -->
 	</div>
 
 	<!-- Main Scroll Area -->
@@ -49,7 +74,7 @@
 			<!-- Text Channels -->
 			<div class="mb-2">
 				<button
-					on:click={() => toggleCategory('text')}
+					onclick={() => toggleCategory('text')}
 					class="flex w-full items-center px-1 py-1.5 text-xs font-semibold text-gray-400 hover:text-gray-300"
 				>
 					<ChevronDown
@@ -66,10 +91,9 @@
 					<div class="mt-1 space-y-0.5">
 						{#each textChannels as channel, index}
 							<button
-								on:click={() => setActiveChannel(index)}
 								class={cn(
 									'group flex w-full items-center rounded px-2 py-1',
-									activeChannel === index
+									0 === index
 										? 'bg-[#393c43] text-white'
 										: 'text-gray-400 hover:bg-[#393c43] hover:text-gray-300',
 								)}
@@ -78,7 +102,7 @@
 								<span
 									class={cn(
 										'truncate',
-										channel.unread && activeChannel !== index && 'font-semibold text-white',
+										channel.unread && 0 !== index && 'font-semibold text-white',
 									)}
 								>
 									{channel.name}
@@ -97,7 +121,7 @@
 			<!-- Voice Channels -->
 			<div class="mb-2">
 				<button
-					on:click={() => toggleCategory('voice')}
+					onclick={() => toggleCategory('voice')}
 					class="flex w-full items-center px-1 py-1.5 text-xs font-semibold text-gray-400 hover:text-gray-300"
 				>
 					<ChevronDown
@@ -133,7 +157,7 @@
 											<div class="flex items-center text-sm text-gray-400">
 												<div class="relative mr-2">
 													<Avatar class="h-6 w-6">
-														<AvatarImage src={`/placeholder.svg?height=24&width=24`} />
+														<!-- <AvatarImage src={`/placeholder.svg?height=24&width=24`} /> -->
 														<AvatarFallback class="text-xs"
 															>{String.fromCharCode(65 + i)}</AvatarFallback
 														>
@@ -159,7 +183,7 @@
 	<div class="flex h-14 items-center bg-[#292b2f] px-2">
 		<div class="flex min-w-0 flex-1 items-center">
 			<Avatar class="mr-2 h-8 w-8">
-				<AvatarImage src="/placeholder.svg?height=32&width=32" />
+				<!-- <AvatarImage src="/placeholder.svg?height=32&width=32" /> -->
 				<AvatarFallback>U</AvatarFallback>
 			</Avatar>
 			<div class="min-w-0">
@@ -168,9 +192,12 @@
 			</div>
 		</div>
 		<div class="flex space-x-1">
-			<button class="text-gray-400 hover:text-gray-200">
+			<Button onclick={toggle} variant="ghost" size="icon">
+				{#if recording}<MicVocal class="h-5 w-5" />{:else}<MicOff class="h-5 w-5" />{/if}
+			</Button>
+			<!-- <button class="text-gray-400 hover:text-gray-200">
 				<Settings class="h-5 w-5" />
-			</button>
+			</button> -->
 		</div>
 	</div>
 </div>

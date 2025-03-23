@@ -1,5 +1,5 @@
-import type { Procedures } from '@feid/bindings';
+import type { Procedures, LobbyData as LobbyDataI } from '@feid/bindings';
 
 export type LobbyData = Procedures['lobby_create']['output'];
 
-export type LobbyPresenceData = Procedures['lobby_subscribe']['output'];
+export type LobbyPresenceData = LobbyDataI;

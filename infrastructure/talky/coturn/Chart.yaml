@@ -1,0 +1,8 @@
+apiVersion: v2
+name: coturn
+type: application
+description: A Helm chart to deploy coturn
+version: 8.1.2
+
+# renovate: image=coturn/coturn
+appVersion: 4.6.3

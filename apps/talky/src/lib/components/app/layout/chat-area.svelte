@@ -109,10 +109,6 @@
 		return acc;
 	}, []);
 
-	$: {
-		console.log(JSON.stringify(groupedMessages));
-	}
-
 	const formatTime = (date: Date) => {
 		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	};
@@ -183,7 +179,7 @@
 
 					<div class="group flex">
 						<Avatar class="mr-4 mt-0.5 h-10 w-10">
-							<AvatarImage src={group.user.avatar} />
+							<!-- <AvatarImage src={group.user.avatar} /> -->
 							<AvatarFallback class={group.user.color}>
 								{group.user.name.charAt(0)}
 							</AvatarFallback>

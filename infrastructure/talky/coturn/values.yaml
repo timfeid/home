@@ -1,0 +1,154 @@
+---
+replicas: 1
+
+nameOverride: ''
+
+service:
+  type: NodePort
+  externalTrafficPolicy: ''
+
+image:
+  repository: 'coturn/coturn'
+
+  tag: ''
+
+  pullPolicy: IfNotPresent
+
+resources: {}
+
+labels:
+  component: coturn
+
+certificate:
+  enabled: false
+
+  secret: 'turn-tls'
+
+  issuerName: 'letsencrypt-staging'
+
+externalDatabase:
+  enabled: false
+
+  type: 'postgresql'
+
+  hostname: ''
+
+  username: ''
+
+  password: ''
+
+  database: ''
+
+  existingSecret: ''
+
+  secretKeys:
+    username: ''
+
+    password: ''
+
+    database: ''
+
+    hostname: ''
+
+postgresql:
+  enabled: false
+  global:
+    postgresql:
+      auth:
+        username: 'coturn'
+
+        password: ''
+
+        database: 'coturn'
+
+        existingSecret: ''
+
+        secretKeys:
+          hostname: 'hostname'
+
+          database: 'database'
+
+          username: 'username'
+
+          adminPasswordKey: 'postgresPassword'
+
+          userPasswordKey: 'password'
+  primary:
+    initdb:
+      scriptsConfigMap: ''
+
+mysql:
+  enabled: false
+  auth:
+    username: 'coturn'
+
+    password: ''
+
+    database: 'coturn'
+
+    existingSecret: ''
+
+    secretKeys:
+      username: 'username'
+
+      password: 'password'
+
+  initdbScriptsConfigMap: initdb-scripts-config
+
+coturn:
+  realm: 'server.loc'
+
+  auth:
+    username: 'coturn'
+
+    password: 'password'
+
+    existingSecret: ''
+    secretKeys:
+      username: username
+
+      password: password
+
+  listeningIP: '0.0.0.0'
+  externalIP: 'server.loc'
+
+  ports:
+    min: 49152
+    max: 65535
+    listening: 3478
+    tlsListening: 5349
+
+  logFile: 'stdout'
+
+  extraTurnserverConfiguration: |
+    verbose
+
+  initContainer:
+    image:
+      repository: mikefarah/yq
+
+      tag: latest
+
+podSecurityContext:
+  enabled: true
+
+  runAsNonRoot: true
+
+  runAsUser: 1000
+
+  runAsGroup: 1000
+
+  fsGroup: 1000
+  seccompProfile:
+    type: 'RuntimeDefault'
+
+containerSecurityContext:
+  enabled: true
+  capabilities:
+    add: ['NET_BIND_SERVICE']
+
+    drop: ['ALL']
+
+  readOnlyRootFilesystem: false
+
+  allowPrivilegeEscalation: false

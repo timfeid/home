@@ -36,7 +36,7 @@
 							>
 								<div class="relative mr-3">
 									<Avatar class="h-8 w-8">
-										<AvatarImage src={member.avatar} />
+										<!-- <AvatarImage src={member.avatar} /> -->
 										<AvatarFallback>{member.name.charAt(0)}</AvatarFallback>
 									</Avatar>
 									<!-- {#if !role.is_offline}

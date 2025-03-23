@@ -1,4 +1,12 @@
 [workspace]
-members = ["apps/media", "apps/feid"]
+members = [
+  "apps/media",
+  "apps/talky-api",
+  "apps/talky/src-tauri",
+  "apps/talky-test",
+  "apps/talky-soundhouse",
+  "apps/leetcode",
+
+]
 resolver = "2"
-default-members = ["apps/media", "apps/feid"]
+default-members = ["apps/media", "apps/talky-api"]
