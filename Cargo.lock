@@ -213,6 +213,7 @@ checksum = "dcfed56ad506cb2c684a14971b8861fdc3baaaae314b9e5f9bb532cbe3ba7a4f"
 name = "app"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bytemuck",
  "cpal",
  "futures-util",
@@ -226,6 +227,7 @@ dependencies = [
  "tauri-plugin-log",
  "tokio",
  "tokio-tungstenite 0.26.2",
+ "tokio-util",
  "tungstenite 0.26.2",
  "webrtc",
 ]
@@ -2883,6 +2885,9 @@ dependencies = [
 [[package]]
 name = "leetcode"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "libappindicator"
@@ -6342,9 +6347,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.13"
+version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7fcaa8d55a2bdd6b83ace262b016eca0d79ee02818c5c1bcdf0305114081078"
+checksum = "6b9590b93e6fcc1739458317cccd391ad3955e2bde8913edf6f95f9e65a8f034"
 dependencies = [
  "bytes",
  "futures-core",

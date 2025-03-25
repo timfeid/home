@@ -1,5 +1,9 @@
 use std::cmp::Ordering;
 
+mod morse;
+mod name_chain;
+mod sleep;
+
 struct MyHashMap {
     map: Vec<(i32, i32)>,
 }

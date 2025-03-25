@@ -9,7 +9,6 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, Mutex};
-use tokio::time::sleep as async_sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tungstenite::Bytes;
 use webrtc::api::interceptor_registry::register_default_interceptors;
@@ -50,6 +49,7 @@ pub struct StreamingChannel {
     >,
     audio_command_tx: mpsc::Sender<AudioCommand>,
     rt: Arc<tokio::runtime::Runtime>, // Dedicated runtime for all tasks.
+    audio_stop_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
 }
 
 pub fn configure_input_stream(device: &cpal::Device) -> StreamConfig {
@@ -307,11 +307,6 @@ impl StreamingChannel {
                     .await
                     .expect("Failed to create offer");
                 println!("Created offer SDP:\n{}", offer.sdp);
-                // Modify the offer SDP if needed.
-                // let offer = RTCSessionDescription {
-                //     sdp_type: offer.sdp_type,
-                //     sdp: offer.sdp.replace("a=setup:active", "a=setup:actpass"),
-                // };
                 peer_connection
                     .set_local_description(offer)
                     .await
@@ -343,81 +338,96 @@ impl StreamingChannel {
                     Encoder::new(48000, Channels::Stereo, Application::Voip)
                         .expect("Failed to create Opus encoder"),
                 ));
+                let (audio_command_tx, mut audio_command_rx) = mpsc::channel::<AudioCommand>(10);
+                let opus_encoder = Arc::new(Mutex::new(Encoder::new(48000, Channels::Stereo, Application::Voip).expect("Failed to create Opus encoder")));
+                let audio_stop_tx: Arc<Mutex<Option<mpsc::Sender<()>>>> = Arc::new(Mutex::new(None));
+                let audio_track_clone = Arc::clone(&audio_track);
+                let audio_stop_tx_clone = audio_stop_tx.clone();
+                let opus_encoder_clone = opus_encoder.clone();
+
                 rt_clone.spawn(async move {
-                    let mut buffer: Vec<f32> = Vec::new();
                     while let Some(command) = audio_command_rx.recv().await {
                         match command {
                             AudioCommand::Start => {
                                 println!("Starting audio capture...");
                                 let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<f32>>(10);
-                                // Spawn CPAL stream in its own thread.
+                                let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
+
+                                {
+                                    let mut guard = audio_stop_tx_clone.lock().await;
+                                    *guard = Some(stop_tx);
+                                }
+
                                 std::thread::spawn(move || {
                                     let host = cpal::default_host();
-                                    let device = host
-                                        .default_input_device()
-                                        .expect("No input device available");
-                                    println!("Using input device: {}", device.name().unwrap());
+                                    let device = host.default_input_device().expect("No input device");
                                     let config = configure_input_stream(&device);
-                                    let stream = device
-                                        .build_input_stream(
-                                            &config.into(),
-                                            move |data: &[f32], _| {
-                                                let _ = audio_tx.blocking_send(data.to_vec());
-                                            },
-                                            move |err| {
-                                                eprintln!("Stream error: {}", err);
-                                            },
-                                            None,
-                                        )
-                                        .expect("Failed to build input stream");
+
+                                    let stream = device.build_input_stream(
+                                        &config.into(),
+                                        move |data: &[f32], _| {
+                                            let _ = audio_tx.blocking_send(data.to_vec());
+                                        },
+                                        move |err| {
+                                            eprintln!("Stream error: {}", err);
+                                        },
+                                        None,
+                                    ).expect("Failed to build input stream");
+
                                     stream.play().expect("Failed to start stream");
-                                    std::thread::sleep(std::time::Duration::from_secs(300));
+
                                 });
-                                // Process captured audio.
-                                loop {
-                                    if let Some(chunk) = audio_rx.recv().await {
-                                        buffer.extend_from_slice(&chunk);
-                                        while buffer.len() >= 1920 {
-                                            let frame: Vec<i16> = buffer
-                                                .drain(..1920)
-                                                .map(|s| (s * 32767.0) as i16)
-                                                .collect();
-                                            let mut opus_buffer = vec![0u8; 4000];
-                                            let encoded_bytes = {
-                                                let mut encoder = opus_encoder.lock().await;
-                                                match encoder.encode(&frame, &mut opus_buffer) {
-                                                    Ok(n) => n,
-                                                    Err(e) => {
-                                                        eprintln!("Opus encoding failed: {:?}", e);
-                                                        continue;
+
+                                let opus_encoder_clone=opus_encoder_clone.clone();
+                                let audio_track_clone=audio_track_clone.clone();
+                                tokio::spawn(async move {
+let opus_encoder_clone = opus_encoder_clone.clone();
+let audio_track_clone = audio_track_clone.clone();
+                    let mut buffer: Vec<f32> = Vec::new();
+                                    loop {
+                                        tokio::select! {
+                                            _ = stop_rx.recv() => {
+                                                println!("Received stop signal, ending stream loop.");
+                                                break;
+                                            }
+                                            Some(chunk) = audio_rx.recv() => {
+                                                buffer.extend_from_slice(&chunk);
+                                                while buffer.len() >= 1920 {
+                                                    let frame: Vec<i16> = buffer.drain(..1920).map(|s| (s * 32767.0) as i16).collect();
+                                                    let mut opus_buffer = vec![0u8; 4000];
+                                                    let encoded_bytes = {
+                                                        let mut encoder = opus_encoder_clone.lock().await;
+                                                        match encoder.encode(&frame, &mut opus_buffer) {
+                                                            Ok(n) => n,
+                                                            Err(e) => {
+                                                                eprintln!("Opus encoding failed: {:?}", e);
+                                                                continue;
+                                                            }
+                                                        }
+                                                    };
+                                                    let sample = Sample {
+                                                        data: Bytes::copy_from_slice(&opus_buffer[..encoded_bytes]),
+                                                        timestamp: SystemTime::now(),
+                                                        duration: Duration::from_millis(20),
+                                                        packet_timestamp: 0,
+                                                        prev_dropped_packets: 0,
+                                                        prev_padding_packets: 0,
+                                                    };
+                                                    if let Err(e) = audio_track_clone.write_sample(&sample).await {
+                                                        eprintln!("Error sending audio sample: {:?}", e);
                                                     }
                                                 }
-                                            };
-                                            let sample = Sample {
-                                                data: Bytes::copy_from_slice(
-                                                    &opus_buffer[..encoded_bytes],
-                                                ),
-                                                timestamp: SystemTime::now(),
-                                                duration: Duration::from_millis(20),
-                                                packet_timestamp: 0,
-                                                prev_dropped_packets: 0,
-                                                prev_padding_packets: 0,
-                                            };
-                                            if let Err(e) =
-                                                audio_track_clone.write_sample(&sample).await
-                                            {
-                                                eprintln!("Error sending audio sample: {:?}", e);
-                                            } else {
-                                                println!("✅ Sent {} bytes of Opus", encoded_bytes);
                                             }
+                                            else => break,
                                         }
-                                    } else {
-                                        break;
                                     }
-                                }
+                                });
                             }
                             AudioCommand::Stop => {
                                 println!("Stopping audio capture...");
+                                if let Some(stop_tx) = audio_stop_tx_clone.lock().await.take() {
+                                    let _ = stop_tx.send(()).await;
+                                }
                                 break;
                             }
                         }
@@ -431,6 +441,7 @@ impl StreamingChannel {
                     ws_sender,
                     audio_command_tx,
                     rt: rt_clone, // store our dedicated runtime
+                    audio_stop_tx,
                 };
                 // Send the constructed channel back.
                 tx.send(channel)

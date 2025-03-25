@@ -27,11 +27,11 @@ export async function getAccessTokenWithTauri() {
 }
 
 export async function pushToTalkStart() {
-	return await invoke('start_record');
+	return await invoke('toggle_push_to_talk', { active: true });
 }
 
 export async function pushToTalkEnd() {
-	return await invoke('end_record');
+	return await invoke('toggle_push_to_talk', { active: false });
 }
 
 export function createTauriListeners() {
