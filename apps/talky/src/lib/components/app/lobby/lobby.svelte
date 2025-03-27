@@ -98,7 +98,7 @@
 					const answer = await peerConnection.createAnswer();
 					await peerConnection.setLocalDescription(answer);
 					console.log('[WebRTC] Created answer:', answer.sdp);
-					const answerMsg = { answer: answer.sdp, join_code: joinCode };
+					const answerMsg = { type: 'answer', answer: answer.sdp, join_code: joinCode };
 					signalingChannel?.send(JSON.stringify(answerMsg));
 					console.log('[Signaling] Sent SDP answer:', answerMsg);
 				} catch (error) {
@@ -160,7 +160,7 @@
 		peerConnection.onicecandidate = (event) => {
 			if (event.candidate && signalingChannel) {
 				console.log('[WebRTC] New ICE candidate:', event.candidate);
-				signalingChannel.send(JSON.stringify({ candidate: event.candidate }));
+				signalingChannel.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
 			}
 		};
 

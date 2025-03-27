@@ -1,13 +1,14 @@
-// main.rs (or lib.rs)
+use anyhow::{Context, Result};
 use bytemuck::cast_slice;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, SampleRate, StreamConfig};
 use futures_util::{SinkExt, StreamExt};
 use opus::{Application, Channels, Encoder};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, SystemTime};
+use tauri::Manager;
 use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tungstenite::Bytes;
@@ -26,15 +27,82 @@ use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 use webrtc::track::track_local::TrackLocal;
 
-use tauri::{Manager, State};
-
-#[derive(Debug)]
-enum AudioCommand {
-    Start,
-    Stop,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioCaptureConfig {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub buffer_size: usize,
+    pub capture_mode: CaptureMode,
+    pub voice_activity_threshold: f32,
 }
 
-pub struct StreamingChannel {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CaptureMode {
+    PushToTalk,
+    VoiceActivated,
+    Continuous,
+}
+
+pub struct AudioProcessor {
+    config: AudioCaptureConfig,
+    opus_encoder: Arc<Mutex<Encoder>>,
+}
+
+impl AudioProcessor {
+    pub fn new(config: AudioCaptureConfig) -> Result<Self> {
+        let opus_encoder = Encoder::new(
+            config.sample_rate,
+            match config.channels {
+                1 => Channels::Mono,
+                2 => Channels::Stereo,
+                _ => return Err(anyhow::anyhow!("Unsupported number of channels")),
+            },
+            Application::Voip,
+        )?;
+
+        Ok(Self {
+            config,
+            opus_encoder: Arc::new(Mutex::new(opus_encoder)),
+        })
+    }
+
+    fn calculate_rms(samples: &[f32]) -> f32 {
+        let sum_sq: f32 = samples.iter().map(|&s| s * s).sum();
+        (sum_sq / samples.len() as f32).sqrt()
+    }
+
+    fn rms_to_decibels(rms: f32) -> f32 {
+        20.0 * rms.log10()
+    }
+
+    pub fn should_send_audio(&self, samples: &[f32], is_push_to_talk_active: bool) -> bool {
+        match self.config.capture_mode {
+            CaptureMode::PushToTalk => is_push_to_talk_active,
+            CaptureMode::VoiceActivated => {
+                let rms = Self::calculate_rms(samples);
+                let db_level = Self::rms_to_decibels(rms);
+                db_level > self.config.voice_activity_threshold
+            }
+            CaptureMode::Continuous => true,
+        }
+    }
+
+    pub async fn encode_samples(&self, samples: &[f32]) -> Result<Vec<u8>> {
+        let frame: Vec<i16> = samples.iter().map(|&s| (s * 32767.0) as i16).collect();
+
+        let mut opus_buffer = vec![0u8; 4000];
+        let encoded_bytes = {
+            let mut encoder = self.opus_encoder.lock().await;
+            encoder
+                .encode(&frame, &mut opus_buffer)
+                .context("Opus encoding failed")?
+        };
+
+        Ok(opus_buffer[..encoded_bytes].to_vec())
+    }
+}
+
+pub struct WebRTCManager {
     peer_connection: Arc<RTCPeerConnection>,
     audio_track: Arc<TrackLocalStaticSample>,
     ws_sender: Arc<
@@ -47,457 +115,514 @@ pub struct StreamingChannel {
             >,
         >,
     >,
-    audio_command_tx: mpsc::Sender<AudioCommand>,
-    rt: Arc<tokio::runtime::Runtime>, // Dedicated runtime for all tasks.
-    audio_stop_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
+    audio_processor: Arc<AudioProcessor>,
+    capture_control: Arc<Mutex<CaptureControl>>,
+    pub cancellation_token: tokio_util::sync::CancellationToken,
 }
 
-pub fn configure_input_stream(device: &cpal::Device) -> StreamConfig {
-    let supported_config = device
-        .default_input_config()
-        .expect("Failed to get default input config");
-    let mut config: StreamConfig = supported_config.into();
-    config.buffer_size = BufferSize::Fixed(1024);
-    config.sample_rate = SampleRate(48000);
-    config.channels = 2;
-    println!("Configured input stream: {:?}", config);
-    config
+pub struct CaptureControl {
+    push_to_talk_active: bool,
 }
 
-impl StreamingChannel {
-    /// Creates a new StreamingChannel by spawning a dedicated runtime thread
-    /// and running all our async tasks on that runtime.
-    pub async fn new() -> Self {
-        // Spawn a dedicated thread with its own multi-threaded runtime.
-        let (tx, mut rx) = mpsc::channel::<StreamingChannel>(1);
-        thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("Failed to create runtime");
-            let rt = Arc::new(rt);
-            let rt_clone = rt.clone();
-            rt.clone().block_on(async move {
-                // --- 1. Connect to the signaling server ---
-                let ws_url = "ws://localhost:8080/soundhouse";
-                println!("Connecting to signaling server at {}", ws_url);
-                let (ws_stream, _) = connect_async(ws_url)
-                    .await
-                    .expect("Failed to connect to signaling server");
-                let (ws_sender, mut ws_receiver) = ws_stream.split();
-                let ws_sender = Arc::new(Mutex::new(ws_sender));
-                let join_code = "room1";
-                let init_msg = json!({
-                    "join_code": join_code,
-                    "role": "offerer"
-                })
-                .to_string();
-                println!("Sending init message: {}", init_msg);
-                ws_sender
-                    .lock()
-                    .await
-                    .send(Message::Text(init_msg.into()))
-                    .await
-                    .expect("Failed to send init message");
+impl CaptureControl {
+    pub fn new() -> Self {
+        Self {
+            push_to_talk_active: false,
+        }
+    }
 
-                // Spawn a receiver loop on this runtime.
+    pub fn set_push_to_talk(&mut self, active: bool) {
+        self.push_to_talk_active = active;
+    }
 
-                // --- 2. Set up the WebRTC PeerConnection ---
-                let config = RTCConfiguration {
-                    ice_servers: vec![RTCIceServer {
-                        urls: vec![
-                            "stun:server.loc:31899".to_owned(),
-                            "turn:server.loc:30665?transport=udp".to_owned(),
-                            "turn:server.loc:31953?transport=tcp".to_owned(),
-                        ],
-                        username: "coturn".to_string(),
-                        credential: "password".to_string(),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                };
+    pub fn is_push_to_talk_active(&self) -> bool {
+        self.push_to_talk_active
+    }
+}
 
-                let mut media_engine = MediaEngine::default();
-                media_engine
-                    .register_default_codecs()
-                    .expect("Failed to register codecs");
-                let registry = register_default_interceptors(Registry::new(), &mut media_engine)
-                    .expect("Failed to register interceptors");
-                let api = APIBuilder::new()
-                    .with_media_engine(media_engine)
-                    .with_interceptor_registry(registry)
-                    .build();
-                let peer_connection = Arc::new(
-                    api.new_peer_connection(config)
-                        .await
-                        .expect("Failed to create peer connection"),
-                );
-                let pc = peer_connection.clone();
-                let pc_receiver_handle = {
-                let ws_sender_clone = ws_sender.clone();
-                    rt_clone.spawn(async move {
-                        let ws_sender_inner = ws_sender_clone.clone();
-                        loop {
-                            if let Some(msg) = ws_receiver.next().await {
-                                match msg {
-                                    Ok(Message::Text(text)) => {
-                                        println!("Received text message: {}", text);
-                                        let json_msg: Result<Value, _> =
-                                            serde_json::from_str(&text);
+impl WebRTCManager {
+    pub async fn start_audio_capture(&self) -> Result<Arc<dyn cpal::traits::StreamTrait>> {
+        let host = cpal::default_host();
+        let input_device = host
+            .default_input_device()
+            .context("No input device available")?;
 
-                                        if let Ok(json_msg) = json_msg {
-                                            if let Some(answer) =
-                                                json_msg.get("answer").and_then(|v| v.as_str())
-                                            {
-                                                println!("Received SDP answer");
-                                                let answer = RTCSessionDescription::answer(
-                                                    answer.to_string(),
-                                                )
-                                                .unwrap();
+        let config = input_device.default_input_config()?;
+        let stream_config = StreamConfig {
+            channels: config.channels(),
+            sample_rate: config.sample_rate(),
+            buffer_size: BufferSize::Fixed(1024),
+        };
 
-                                                match pc.set_remote_description(answer).await {
-                                                    Ok(_) => println!(
-                                                        "Set remote description successfully"
-                                                    ),
-                                                    Err(e) => println!(
-                                                        "Error setting remote description: {:?}",
-                                                        e
-                                                    ),
-                                                }
-                                            }
+        let (tx, mut rx) = mpsc::channel::<Vec<f32>>(100);
+        let audio_processor = Arc::clone(&self.audio_processor);
+        let audio_track = Arc::clone(&self.audio_track);
+        let capture_control = Arc::clone(&self.capture_control);
+        let cancellation_token = self.cancellation_token.clone();
 
-                                            if let Some(candidate) = json_msg.get("candidate") {
-                                                println!("Received ICE candidate: {:?}", candidate);
+        // Spawn processing task
+        tokio::spawn(async move {
+            println!("Audio processing task started");
+            let mut buffer: Vec<f32> = Vec::new();
+            let mut samples_processed = 0;
 
-                                                match serde_json::from_str::<RTCIceCandidateInit>(
-                                                    &serde_json::to_string(candidate).unwrap(),
-                                                ) {
-                                                    Ok(candidate_init) => {
-                                                        if let Err(e) = pc
-                                                            .add_ice_candidate(candidate_init)
-                                                            .await
-                                                        {
-                                                            println!(
-                                                                "Error adding ICE candidate: {:?}",
-                                                                e
-                                                            );
-                                                        }
-                                                    }
-                                                    Err(e) => println!(
-                                                        "Error parsing ICE candidate: {:?}",
-                                                        e
-                                                    ),
-                                                }
-                                            }
+            // Determine the frame size expected by Opus
+            let frame_size = match audio_processor.config.channels {
+                1 => 960,  // 20ms @ 48kHz mono
+                2 => 1920, // 20ms @ 48kHz stereo
+                _ => {
+                    eprintln!("Unsupported channel count");
+                    return;
+                }
+            };
 
-                                            if json_msg.get("type") == Some(&json!("active_clients")) {
-                                                println!("[SignalingManager] Received active_clients message.");
-                                                if let Some(clients) = json_msg.get("clients").and_then(|v| v.as_array()) {
-                                                    if clients.iter().any(|c| c.get("role") == Some(&json!("answerer"))) {
-                                                        println!("[SignalingManager] Answerer joined, resending offer...");
-                                                        if let Some(local_desc) = pc.local_description().await {
-                                                            let offer_msg = json!({
-                                                                "offer": local_desc.sdp,
-                                                                "join_code": "room1"
-                                                            })
-                                                            .to_string();
-                                                            if let Err(e) = ws_sender_inner.lock().await.send(Message::Text(offer_msg.into())).await {
-                                                                eprintln!("[SignalingManager] Failed to resend offer: {:?}", e);
-                                                            }
-                                                        } else {
-                                                            eprintln!("[SignalingManager] No local description available to resend.");
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Ok(Message::Ping(data)) => {
-                                        println!("[Signaling] Received Ping, sending Pong");
-                                        if let Err(e) = ws_sender_inner
-                                            .lock()
-                                            .await
-                                            .send(Message::Pong(data))
-                                            .await
-                                        {
-                                            println!("[Signaling] Error sending Pong: {:?}", e);
-                                        }
-                                    }
-                                    Ok(Message::Close(_)) => {
-                                        println!("[Signaling] WebSocket closed");
-                                        break;
-                                    }
-                                    Err(e) => {
-                                        println!("[Signaling] WebSocket error: {:?}", e);
-                                        break;
-                                    }
-                                    _ => {}
-                                }
+            while let Some(chunk) = rx.recv().await {
+                if cancellation_token.is_cancelled() {
+                    println!("Cancellation token triggered");
+                    break;
+                }
+
+                buffer.extend_from_slice(&chunk);
+                samples_processed += chunk.len();
+
+                while buffer.len() >= frame_size {
+                    let frame_f32: Vec<f32> = buffer.drain(..frame_size).collect();
+
+                    // Capture mode logic
+                    let capture_control_guard = capture_control.lock().await;
+                    let should_send = audio_processor.should_send_audio(
+                        &frame_f32,
+                        capture_control_guard.is_push_to_talk_active(),
+                    );
+
+                    if !should_send {
+                        continue;
+                    }
+
+                    // Convert float to i16 for Opus
+                    let frame_i16: Vec<i16> = frame_f32
+                        .iter()
+                        .map(|&s| (s * 32767.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16)
+                        .collect();
+
+                    let mut opus_buffer = vec![0u8; 4000];
+                    let encoded_bytes = {
+                        let mut encoder = audio_processor.opus_encoder.lock().await;
+                        match encoder.encode(&frame_i16, &mut opus_buffer) {
+                            Ok(n) => n,
+                            Err(e) => {
+                                eprintln!("Opus encoding failed: {:?}", e);
+                                continue;
                             }
                         }
-                        println!("[Signaling] Receiver loop ended");
-                    })
-                };
-                println!("Created peer connection");
+                    };
 
-                // Log state changes.
-                {
-                    let pc = Arc::clone(&peer_connection);
-                    peer_connection.on_peer_connection_state_change(Box::new(move |state| {
-                        println!("Peer Connection State Changed: {:?}", state);
-                        if state == RTCPeerConnectionState::Failed {
-                            println!("Peer connection failed, attempting restart...");
-                        }
-                        Box::pin(async {})
-                    }));
+                    let sample = Sample {
+                        data: Bytes::copy_from_slice(&opus_buffer[..encoded_bytes]),
+                        timestamp: SystemTime::now(),
+                        duration: Duration::from_millis(20),
+                        packet_timestamp: 0,
+                        prev_dropped_packets: 0,
+                        prev_padding_packets: 0,
+                    };
+
+                    if let Err(e) = audio_track.write_sample(&sample).await {
+                        eprintln!("Error writing audio sample: {:?}", e);
+                    } else {
+                        println!("✅ Sent {} bytes of Opus", encoded_bytes);
+                    }
                 }
+            }
 
-                // ICE candidate handling.
-                let ws_sender_clone = ws_sender.clone();
-                {
-                    let join_code = join_code.to_string();
-                    peer_connection.on_ice_candidate(Box::new(move |candidate| {
-                        let ws_sender_inner = ws_sender_clone.clone();
-                        let join_code = join_code.clone();
-                        Box::pin(async move {
-                            if let Some(candidate) = candidate {
-                                println!("New ICE candidate: {:?}", candidate);
-                                if let Ok(candidate_json) = candidate.to_json() {
-                                    let msg = json!({
-                                        "candidate": candidate_json,
-                                        "join_code": join_code
-                                    })
-                                    .to_string();
-                                    if let Err(e) = ws_sender_inner
-                                        .lock()
-                                        .await
-                                        .send(Message::Text(msg.into()))
-                                        .await
-                                    {
-                                        println!("Error sending ICE candidate: {:?}", e);
-                                    }
-                                }
-                            }
-                        })
-                    }));
+            println!(
+                "Audio processing task ended after processing {} samples",
+                samples_processed
+            );
+        });
+
+        let sender = tx.clone();
+        let stream = input_device.build_input_stream(
+            &stream_config,
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                println!("Audio callback called with {} samples", data.len());
+                match sender.try_send(data.to_vec()) {
+                    Ok(_) => {
+                        println!("Successfully sent samples to processing task");
+                    }
+                    Err(e) => {
+                        eprintln!("Audio channel is full, dropping samples: {:?}", e);
+                    }
                 }
+            },
+            |err| eprintln!("Audio input stream error: {:?}", err),
+            None,
+        )?;
 
-                // --- 3. Create the audio track and add to PeerConnection ---
-                let audio_track = Arc::new(TrackLocalStaticSample::new(
-                    RTCRtpCodecCapability {
-                        mime_type: "audio/opus".to_owned(),
-                        ..Default::default()
-                    },
-                    "audio".to_owned(),
-                    "webrtc-audio".to_owned(),
-                ));
-                println!("Created audio track");
-                let rtp_sender = peer_connection
-                    .add_track(Arc::clone(&audio_track) as Arc<dyn TrackLocal + Send + Sync>)
-                    .await
-                    .expect("Failed to add audio track");
-                rt_clone.spawn(async move {
-                    let mut rtcp_buf = vec![0u8; 1500];
-                    while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-                });
+        stream.play()?;
+        println!("Started audio capture");
 
-                // --- 4. Create and send an SDP offer ---
-                let offer = peer_connection
-                    .create_offer(None)
-                    .await
-                    .expect("Failed to create offer");
-                println!("Created offer SDP:\n{}", offer.sdp);
-                peer_connection
-                    .set_local_description(offer)
-                    .await
-                    .expect("Failed to set local description");
-                let mut gather_complete = peer_connection.gathering_complete_promise().await;
-                let _ = gather_complete.recv().await;
-                println!("ICE gathering complete");
-                if let Some(local_desc) = peer_connection.local_description().await {
-                    println!("Sending offer SDP to remote peer");
-                    let offer_msg = json!({
-                        "offer": local_desc.sdp,
-                        "join_code": join_code
-                    })
-                    .to_string();
-                    ws_sender
-                        .lock()
-                        .await
-                        .send(Message::Text(offer_msg.into()))
-                        .await
-                        .expect("Failed to send offer message");
-                } else {
-                    println!("Failed to get local description");
-                }
+        // Wrap the stream in an Arc to extend its lifetime
+        Ok(Arc::new(stream))
+    }
 
-                // --- 5. Set up audio capture ---
-                let (audio_command_tx, mut audio_command_rx) = mpsc::channel::<AudioCommand>(10);
-                let audio_track_clone = Arc::clone(&audio_track);
-                let opus_encoder = Arc::new(tokio::sync::Mutex::new(
-                    Encoder::new(48000, Channels::Stereo, Application::Voip)
-                        .expect("Failed to create Opus encoder"),
-                ));
-                let (audio_command_tx, mut audio_command_rx) = mpsc::channel::<AudioCommand>(10);
-                let opus_encoder = Arc::new(Mutex::new(Encoder::new(48000, Channels::Stereo, Application::Voip).expect("Failed to create Opus encoder")));
-                let audio_stop_tx: Arc<Mutex<Option<mpsc::Sender<()>>>> = Arc::new(Mutex::new(None));
-                let audio_track_clone = Arc::clone(&audio_track);
-                let audio_stop_tx_clone = audio_stop_tx.clone();
-                let opus_encoder_clone = opus_encoder.clone();
+    pub async fn stop_audio_capture(&self) {
+        self.cancellation_token.cancel();
+    }
 
-                rt_clone.spawn(async move {
-                    while let Some(command) = audio_command_rx.recv().await {
-                        match command {
-                            AudioCommand::Start => {
-                                println!("Starting audio capture...");
-                                let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<f32>>(10);
-                                let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
+    pub async fn process_audio_samples(&self, samples: &[f32]) -> Result<()> {
+        let capture_control = self.capture_control.lock().await;
+        let should_send = self
+            .audio_processor
+            .should_send_audio(samples, capture_control.is_push_to_talk_active());
 
-                                {
-                                    let mut guard = audio_stop_tx_clone.lock().await;
-                                    *guard = Some(stop_tx);
-                                }
+        if !should_send {
+            return Ok(());
+        }
 
-                                std::thread::spawn(move || {
-                                    let host = cpal::default_host();
-                                    let device = host.default_input_device().expect("No input device");
-                                    let config = configure_input_stream(&device);
+        let encoded_samples = self.audio_processor.encode_samples(samples).await?;
 
-                                    let stream = device.build_input_stream(
-                                        &config.into(),
-                                        move |data: &[f32], _| {
-                                            let _ = audio_tx.blocking_send(data.to_vec());
-                                        },
-                                        move |err| {
-                                            eprintln!("Stream error: {}", err);
-                                        },
-                                        None,
-                                    ).expect("Failed to build input stream");
+        let sample = Sample {
+            packet_timestamp: 0,
+            prev_padding_packets: 0,
+            prev_dropped_packets: 0,
+            data: Bytes::from(encoded_samples),
+            duration: Duration::from_millis(20),
+            timestamp: SystemTime::now(),
+        };
 
-                                    stream.play().expect("Failed to start stream");
+        self.audio_track.write_sample(&sample).await?;
 
-                                });
+        Ok(())
+    }
 
-                                let opus_encoder_clone=opus_encoder_clone.clone();
-                                let audio_track_clone=audio_track_clone.clone();
-                                tokio::spawn(async move {
-let opus_encoder_clone = opus_encoder_clone.clone();
-let audio_track_clone = audio_track_clone.clone();
-                    let mut buffer: Vec<f32> = Vec::new();
-                                    loop {
-                                        tokio::select! {
-                                            _ = stop_rx.recv() => {
-                                                println!("Received stop signal, ending stream loop.");
-                                                break;
-                                            }
-                                            Some(chunk) = audio_rx.recv() => {
-                                                buffer.extend_from_slice(&chunk);
-                                                while buffer.len() >= 1920 {
-                                                    let frame: Vec<i16> = buffer.drain(..1920).map(|s| (s * 32767.0) as i16).collect();
-                                                    let mut opus_buffer = vec![0u8; 4000];
-                                                    let encoded_bytes = {
-                                                        let mut encoder = opus_encoder_clone.lock().await;
-                                                        match encoder.encode(&frame, &mut opus_buffer) {
-                                                            Ok(n) => n,
-                                                            Err(e) => {
-                                                                eprintln!("Opus encoding failed: {:?}", e);
-                                                                continue;
-                                                            }
-                                                        }
-                                                    };
-                                                    let sample = Sample {
-                                                        data: Bytes::copy_from_slice(&opus_buffer[..encoded_bytes]),
-                                                        timestamp: SystemTime::now(),
-                                                        duration: Duration::from_millis(20),
-                                                        packet_timestamp: 0,
-                                                        prev_dropped_packets: 0,
-                                                        prev_padding_packets: 0,
-                                                    };
-                                                    if let Err(e) = audio_track_clone.write_sample(&sample).await {
-                                                        eprintln!("Error sending audio sample: {:?}", e);
-                                                    }
-                                                }
-                                            }
-                                            else => break,
-                                        }
-                                    }
-                                });
-                            }
-                            AudioCommand::Stop => {
-                                println!("Stopping audio capture...");
-                                if let Some(stop_tx) = audio_stop_tx_clone.lock().await.take() {
-                                    let _ = stop_tx.send(()).await;
-                                }
-                                break;
+    pub async fn set_capture_mode(&self, mode: CaptureMode) -> Result<()> {
+        Ok(())
+    }
+
+    pub async fn new(
+        config: AudioCaptureConfig,
+        signaling_url: &str,
+        join_code: String,
+    ) -> Result<Self> {
+        let cancellation_token = tokio_util::sync::CancellationToken::new();
+        let cancellation_token_clone = cancellation_token.clone();
+
+        let rtc_config = RTCConfiguration {
+            ice_servers: vec![RTCIceServer {
+                urls: vec![
+                    "stun:server.loc:31899".to_owned(),
+                    "turn:server.loc:30665?transport=udp".to_owned(),
+                    "turn:server.loc:31953?transport=tcp".to_owned(),
+                ],
+                username: "coturn".to_string(),
+                credential: "password".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let mut media_engine = MediaEngine::default();
+        media_engine
+            .register_default_codecs()
+            .context("Failed to register codecs")?;
+
+        let registry = register_default_interceptors(Registry::new(), &mut media_engine)
+            .context("Failed to register interceptors")?;
+
+        let api = APIBuilder::new()
+            .with_media_engine(media_engine)
+            .with_interceptor_registry(registry)
+            .build();
+
+        let peer_connection = Arc::new(
+            api.new_peer_connection(rtc_config)
+                .await
+                .context("Failed to create peer connection")?,
+        );
+
+        let (ws_stream, _) =
+            tokio::time::timeout(Duration::from_secs(10), connect_async(signaling_url))
+                .await
+                .context("WebSocket connection timeout")?
+                .context("Failed to connect to signaling server")?;
+
+        let (ws_sender, mut ws_receiver) = ws_stream.split();
+        let ws_sender = Arc::new(Mutex::new(ws_sender));
+
+        let init_msg = json!({
+            "join_code": join_code.clone(),
+            "role": "offerer"
+        })
+        .to_string();
+        ws_sender
+            .lock()
+            .await
+            .send(Message::Text(init_msg.into()))
+            .await
+            .context("Failed to send init message")?;
+
+        let ws_sender_clone = ws_sender.clone();
+        {
+            let join_code_inner = join_code.clone();
+            peer_connection.on_ice_candidate(Box::new(move |candidate| {
+                let ws_sender_inner = ws_sender_clone.clone();
+                let join_code = join_code_inner.clone();
+                Box::pin(async move {
+                    let join_code = join_code.clone();
+                    if let Some(candidate) = candidate {
+                        println!("New ICE candidate: {:?}", candidate);
+                        if let Ok(candidate_json) = candidate.to_json() {
+                            let msg = json!({
+                                "candidate": candidate_json,
+                                "join_code": &join_code
+                            })
+                            .to_string();
+                            if let Err(e) = ws_sender_inner
+                                .lock()
+                                .await
+                                .send(Message::Text(msg.into()))
+                                .await
+                            {
+                                println!("Error sending ICE candidate: {:?}", e);
                             }
                         }
                     }
-                });
+                })
+            }));
+        }
 
-                // Construct the StreamingChannel and send it over the channel.
-                let channel = StreamingChannel {
-                    peer_connection,
-                    audio_track,
-                    ws_sender,
-                    audio_command_tx,
-                    rt: rt_clone, // store our dedicated runtime
-                    audio_stop_tx,
-                };
-                // Send the constructed channel back.
-                tx.send(channel)
-                    .await
-                    .expect("Failed to send StreamingChannel");
-            });
+        let audio_track = Arc::new(TrackLocalStaticSample::new(
+            RTCRtpCodecCapability {
+                mime_type: "audio/opus".to_owned(),
+                ..Default::default()
+            },
+            "audio".to_owned(),
+            "webrtc-audio".to_owned(),
+        ));
+
+        let rtp_sender = peer_connection
+            .add_track(Arc::clone(&audio_track) as Arc<dyn TrackLocal + Send + Sync>)
+            .await
+            .context("Failed to add audio track")?;
+
+        let _rtcp_thread = tokio::spawn(async move {
+            let mut rtcp_buf = vec![0u8; 1500];
+            while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+            Result::<(), webrtc::Error>::Ok(())
         });
-        // Wait and receive the StreamingChannel from our thread.
-        let channel = rx.recv().await.expect("Failed to receive StreamingChannel");
-        channel
+
+        let audio_processor = Arc::new(AudioProcessor::new(config)?);
+        let capture_control = Arc::new(Mutex::new(CaptureControl::new()));
+
+        let pc_clone = Arc::clone(&peer_connection);
+        let ws_sender_clone = ws_sender.clone();
+
+        let join_code_inner = join_code.clone();
+        tokio::spawn(async move {
+            let join_code = join_code_inner.clone();
+            println!("DEBUG: Starting WebSocket receiver loop");
+
+            loop {
+                println!("DEBUG: Top of loop");
+                tokio::select! {
+                                    _ = cancellation_token_clone.cancelled() => {
+                                        println!("CRITICAL: WebSocket receiver loop cancelled");
+                                        break;
+                                    }
+                                    Some(msg_result) = ws_receiver.next() => {
+                                        println!("DEBUG: Received a message in stream");
+                                        match msg_result {
+                                            Ok(msg) => {
+                                                println!("DEBUG: Message is Ok");
+                                                match msg {
+                                                    Message::Text(text) => {
+                                                        println!("VERBOSE: Received WebSocket text message: {}", text);
+
+                                                        match serde_json::from_str::<Value>(&text) {
+                                                            Ok(json_msg) => {
+                                                                println!("VERBOSE: Parsed JSON message: {:#?}", json_msg);
+
+                                                                match json_msg.get("type").and_then(|t| t.as_str()) {
+                                                                    Some("active_clients") => {
+                                                                        println!("INFO: Received active_clients message.");
+                                                                        if let Some(clients) = json_msg.get("clients").and_then(|v| v.as_array()) {
+                                                                            println!("DEBUG: Clients array: {:?}", clients);
+                                                                            if clients.iter().any(|c| c.get("role") == Some(&json!("answerer"))) {
+                                                                                println!("INFO: Answerer detected, attempting to send offer...");
+                                                                                if let Some(local_desc) = pc_clone.local_description().await {
+                                                                                    let offer_msg = json!({
+                                                                                        "type": "offer",
+                                                                                        "offer": local_desc.sdp,
+                                                                                        "join_code": join_code.clone()
+                                                                                    })
+                                                                                    .to_string();
+
+                                                                                    println!("DEBUG: Offer message: {}", offer_msg);
+                                                                                    match ws_sender_clone.lock().await.send(Message::Text(offer_msg.into())).await {
+                                                                                        Ok(_) => println!("INFO: Offer sent successfully"),
+                                                                                        Err(e) => eprintln!("ERROR: Failed to send offer: {:?}", e),
+                                                                                    }
+                                                                                } else {
+                                                                                    println!("WARNING: No local description available");
+                                                                                }
+                                                                            } else {
+                                                                                println!("DEBUG: No answerer found in clients");
+                                                                            }
+                                                                        } else {
+                                                                            println!("WARNING: No clients array in message");
+                                                                        }
+                                                                    }
+                                                                    Some("answer") => {
+                 if let Some( answer) = json_msg.get("answer").and_then(|v| v.as_str()) {
+
+                                            println!("Received SDP answer");
+                                            let answer = RTCSessionDescription::answer(answer.to_string()).unwrap();
+
+                                            match pc_clone.set_remote_description(answer).await {
+                                                Ok(_) => println!("Set remote description successfully"),
+                                                Err(e) => println!("Error setting remote description: {:?}", e),
+                                            }
+                }
+                                                                    }
+                                                                    Some("candidate") => {
+                                                                        println!("INFO: Received ICE candidate");
+                                                                        if let Some(candidate_obj) = json_msg.get("candidate") {
+                                                                            match serde_json::from_str::<RTCIceCandidateInit>(
+                                                                                &serde_json::to_string(candidate_obj).unwrap()
+                                                                            ) {
+                                                                                Ok(candidate_init) => {
+                                                                                    if let Err(e) = pc_clone.add_ice_candidate(candidate_init).await {
+                                                                                        eprintln!("ERROR: Adding ICE candidate failed: {:?}", e);
+                                                                                    }
+                                                                                }
+                                                                                Err(e) => eprintln!("ERROR: Parsing ICE candidate failed: {:?}", e),
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    _ => {
+                                                                        println!("WARNING: Unhandled message type: {}",
+                                                                            json_msg.get("type").and_then(|t| t.as_str()).unwrap_or("unknown"));
+                                                                    }
+                                                                }
+                                                            },
+                                                            Err(e) => {
+                                                                eprintln!("ERROR: Failed to parse JSON message: {:?}", e);
+                                                                eprintln!("RAW message content: {}", text);
+                                                            }
+                                                        }
+                                                    },
+                                                    Message::Ping(ping_data) => {
+                                                        println!("INFO: Received Ping, sending Pong");
+                                                        if let Err(e) = ws_sender_clone.lock().await.send(Message::Pong(ping_data)).await {
+                                                            eprintln!("ERROR: Sending Pong failed: {:?}", e);
+                                                            break;
+                                                        }
+                                                    },
+                                                    Message::Close(_) => {
+                                                        println!("INFO: WebSocket connection closed");
+                                                        break;
+                                                    },
+                                                    _ => {
+                                                        println!("WARNING: Received unhandled message type");
+                                                    }
+                                                }
+                                            },
+                                            Err(e) => {
+                                                eprintln!("ERROR: WebSocket stream error: {:?}", e);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    else => {
+
+                                        tokio::time::sleep(Duration::from_millis(100)).await;
+                                        println!("TRACE: Idle loop iteration");
+                                    }
+                                }
+            }
+
+            println!("CRITICAL: WebSocket receiver loop terminated");
+        });
+
+        let offer = peer_connection
+            .create_offer(None)
+            .await
+            .context("Failed to create offer")?;
+
+        peer_connection
+            .set_local_description(offer)
+            .await
+            .context("Failed to set local description")?;
+
+        let mut gather_complete = peer_connection.gathering_complete_promise().await;
+        let _ = gather_complete.recv().await;
+
+        if let Some(local_desc) = peer_connection.local_description().await {
+            let offer_msg = json!({
+                "offer": local_desc.sdp,
+                "join_code": &join_code
+            })
+            .to_string();
+
+            ws_sender
+                .lock()
+                .await
+                .send(Message::Text(offer_msg.into()))
+                .await
+                .context("Failed to send offer message")?;
+        }
+
+        Ok(Self {
+            peer_connection,
+            audio_track,
+            ws_sender,
+            audio_processor,
+            capture_control,
+            cancellation_token,
+        })
     }
 
-    pub async fn start(&self) {
-        println!("StreamingChannel: start()");
-        let _ = self.audio_command_tx.send(AudioCommand::Start).await;
-    }
+    pub async fn stop(&self) {}
 
-    pub async fn stop(&self) {
-        println!("StreamingChannel: stop()");
-        let _ = self.audio_command_tx.send(AudioCommand::Stop).await;
+    pub async fn shutdown(&self) {
+        self.cancellation_token.cancel();
+
+        println!("WebRTCManager shutting down");
     }
 }
 
-// --- Tauri Commands and run() ---
 #[tauri::command]
-async fn start_record(state: State<'_, StreamingChannel>) -> Result<(), String> {
-    println!("Tauri command: start_record");
-    state.start().await;
+async fn configure_audio_capture(
+    config: AudioCaptureConfig,
+    state: tauri::State<'_, WebRTCManager>,
+) -> Result<(), String> {
     Ok(())
 }
 
 #[tauri::command]
-async fn end_record(state: State<'_, StreamingChannel>) -> Result<(), String> {
-    println!("Tauri command: end_record");
-    state.stop().await;
+async fn toggle_push_to_talk(
+    active: bool,
+    state: tauri::State<'_, WebRTCManager>,
+) -> Result<(), String> {
+    let mut capture_control = state.capture_control.lock().await;
+
+    capture_control.set_push_to_talk(active);
+
+    println!("Push-to-talk {}activated", if active { "" } else { "de" });
+
     Ok(())
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+pub fn run(manager: WebRTCManager) {
     tauri::Builder::default()
         .setup(|app| {
-            let app_handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let runtime = tokio::runtime::Runtime::new().unwrap();
-                runtime.block_on(async {
-                    println!("🚀 Initializing StreamingChannel in background...");
-                    let manager = StreamingChannel::new().await;
-                    println!("✅ StreamingChannel ready!");
-                    app_handle.manage(manager);
-                });
-            });
-            println!("✅ Tauri app setup complete.");
+            app.handle().manage(manager);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_record, end_record])
+        .invoke_handler(tauri::generate_handler![
+            configure_audio_capture,
+            toggle_push_to_talk
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
