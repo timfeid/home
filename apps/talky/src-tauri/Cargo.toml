@@ -27,7 +27,7 @@ cpal = "0.15.3"
 bytemuck = "1.22.0"
 tungstenite = "0.26.2"
 webrtc = "0.12.0"
-tokio = "1.44.1"
+tokio = { workspace = true }
 reqwest = "0.12.14"
 opus = "0.3.0"
 futures-util = "0.3.31"

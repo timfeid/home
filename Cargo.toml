@@ -6,7 +6,8 @@ members = [
   "apps/talky-test",
   "apps/talky-soundhouse",
   "apps/leetcode",
-  "libs/auth", "libs/data",
+  "libs/auth",
+  "libs/data",
 
 ]
 resolver = "2"
@@ -15,3 +16,8 @@ default-members = ["apps/media", "apps/talky-api"]
 [workspace.dependencies]
 anyhow = "1.0.97"
 serde = { version = "1.0.219", features = ["derive"] }
+tokio = { version = "1.44.1", features = [
+  "rt-multi-thread",
+  "macros",
+  "signal",
+] }
