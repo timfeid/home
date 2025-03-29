@@ -68,6 +68,7 @@
 			// Identify this client as an answerer.
 			const initMsg = {
 				join_code: joinCode,
+				auth_code: user.accessToken,
 				role: 'answerer',
 			};
 			signalingChannel?.send(JSON.stringify(initMsg));

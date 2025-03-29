@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use futures::{stream::SplitSink, SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::any::TypeId;
@@ -55,7 +56,7 @@ async fn handle_connection(ws: WebSocket, rooms: Rooms) {
     let init_msg = match receiver.next().await {
         Some(Ok(msg)) if msg.is_text() => msg.to_str().unwrap().to_string(),
         _ => {
-            eprintln!("No valid init message received");
+            println!("No valid init message received");
             return;
         }
     };
@@ -68,18 +69,21 @@ async fn handle_connection(ws: WebSocket, rooms: Rooms) {
         }
     };
 
-    let join_code = init_json
-        .get("join_code")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let role = init_json.get("role").and_then(|v| v.as_str()).unwrap_or("");
+    let join_code = get_str_or_error(&init_json, "join_code").unwrap_or_default();
+    let auth_code = get_str_or_error(&init_json, "auth_code").unwrap_or_default();
+    let role = get_str_or_error(&init_json, "role").unwrap_or_default();
+
+    let user = match talky_auth::JwtService::decode(auth_code) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Invalid user token: {:?}", auth_code);
+            return;
+        }
+    };
 
     let client_id = Uuid::new_v4().to_string();
 
-    println!(
-        "Client {} joined room '{}' as {}",
-        client_id, join_code, role
-    );
+    println!("Client {:?} joined room '{}' as {}", user, join_code, role);
 
     let client_info = ClientInfo {
         id: client_id.clone(),
@@ -167,4 +171,11 @@ async fn broadcast_active_clients(join_code: &str, room: &Room) {
             );
         }
     }
+}
+
+fn get_str_or_error<'a>(json: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
+    json.get(key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| format!("Missing or empty field: {}", key))
 }

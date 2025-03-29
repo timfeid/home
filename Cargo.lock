@@ -5767,9 +5767,11 @@ dependencies = [
 name = "talky-soundhouse"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "futures",
  "futures-util",
  "serde_json",
+ "talky-auth",
  "tokio",
  "tokio-tungstenite 0.26.2",
  "ulid",
