@@ -51,7 +51,7 @@ pub struct AudioProcessor {
 impl AudioProcessor {
     pub fn new(config: AudioCaptureConfig) -> Result<Self> {
         let opus_encoder = Encoder::new(
-            config.sample_rate,
+            48000,
             match config.channels {
                 1 => Channels::Mono,
                 2 => Channels::Stereo,
@@ -91,6 +91,7 @@ impl AudioProcessor {
         let frame: Vec<i16> = samples.iter().map(|&s| (s * 32767.0) as i16).collect();
 
         let mut opus_buffer = vec![0u8; 4000];
+
         let encoded_bytes = {
             let mut encoder = self.opus_encoder.lock().await;
             encoder
@@ -149,8 +150,8 @@ impl WebRTCManager {
 
         let config = input_device.default_input_config()?;
         let stream_config = StreamConfig {
-            channels: config.channels(),
-            sample_rate: config.sample_rate(),
+            channels: 2,
+            sample_rate: SampleRate(48000),
             buffer_size: BufferSize::Fixed(1024),
         };
 
@@ -185,7 +186,7 @@ impl WebRTCManager {
                 buffer.extend_from_slice(&chunk);
                 samples_processed += chunk.len();
 
-                while buffer.len() >= frame_size {
+                while buffer.len() >= 1920 {
                     let frame_f32: Vec<f32> = buffer.drain(..frame_size).collect();
 
                     // Capture mode logic
@@ -205,6 +206,13 @@ impl WebRTCManager {
                         .map(|&s| (s * 32767.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16)
                         .collect();
 
+                    println!("DEBUG: First few samples: {:?}", &frame_i16[0..10]); // Check the i16 values
+
+                    println!("DEBUG: Frame size: {}", frame_size);
+                    println!(
+                        "DEBUG: Input sample rate: {}",
+                        audio_processor.config.sample_rate
+                    );
                     let mut opus_buffer = vec![0u8; 4000];
                     let encoded_bytes = {
                         let mut encoder = audio_processor.opus_encoder.lock().await;
@@ -216,6 +224,8 @@ impl WebRTCManager {
                             }
                         }
                     };
+
+                    println!("DEBUG: First few i16 samples: {:?}", &frame_i16[0..10]);
 
                     let sample = Sample {
                         data: Bytes::copy_from_slice(&opus_buffer[..encoded_bytes]),
