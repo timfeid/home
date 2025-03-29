@@ -9,10 +9,6 @@ edition = "2021"
 name = "server"
 path = "src/bins/server.rs"
 
-[[bin]]
-name = "game"
-path = "src/bins/game.rs"
-
 [dependencies]
 talky-data = { path = "../../libs/data" }
 talky-auth = { path = "../../libs/auth" }
