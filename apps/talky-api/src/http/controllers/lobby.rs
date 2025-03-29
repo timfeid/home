@@ -9,6 +9,7 @@ use async_stream::stream;
 use futures::{pin_mut, Stream};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use talky_auth::JwtService;
 use tokio::{
     sync::{Mutex, MutexGuard},
     time::interval,
@@ -22,7 +23,6 @@ use crate::{
         lobby::{Lobby, LobbyChat, LobbyCommand, LobbyData},
         manager::LobbyManager,
     },
-    services::jwt::{Claims, JwtService},
 };
 
 pub struct LobbyController {}

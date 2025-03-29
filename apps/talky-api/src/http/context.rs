@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use axum::http::request::Parts;
 use sqlx::{Pool, Postgres};
+use talky_auth::{Claims, JwtService};
 
 use crate::{
     error::{AppError, AppResult},
     lobby::manager::LobbyManager,
-    services::jwt::{Claims, JwtService},
 };
 
 #[derive(Debug)]

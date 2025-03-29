@@ -3,7 +3,9 @@
 
 use std::time::Duration;
 
+use anyhow::Context;
 use app_lib::{run, AudioCaptureConfig, CaptureMode, WebRTCManager};
+use cpal::traits::{DeviceTrait, HostTrait};
 
 fn default_audio_config() -> AudioCaptureConfig {
     AudioCaptureConfig {
@@ -19,9 +21,14 @@ fn default_audio_config() -> AudioCaptureConfig {
 async fn main() -> anyhow::Result<()> {
     // Define the default audio capture configuration
 
+    let host = cpal::default_host();
+    let input_device = host
+        .default_input_device()
+        .context("No input device available")?;
+    let supported_config = input_device.default_input_config()?;
     let default_config = AudioCaptureConfig {
-        sample_rate: 48000,
-        channels: 2,
+        sample_rate: supported_config.sample_rate().0,
+        channels: supported_config.channels(),
         buffer_size: 1024,
         capture_mode: CaptureMode::VoiceActivated,
         voice_activity_threshold: -40.0, // in dB

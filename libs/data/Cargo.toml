@@ -1,0 +1,17 @@
+[package]
+name = "talky-data"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bcrypt = "0.17.0"
+sqlx = { version = "0.8.1", features = [
+  "postgres",
+  "runtime-tokio-rustls",
+  "time",
+] }
+uuid = { version = "1.10.0", features = ["v4"] }
+anyhow = { workspace = true }
+
+[lib]
+path = "lib.rs"

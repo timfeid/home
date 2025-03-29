@@ -16,7 +16,6 @@ use warp::{
 struct ClientInfo {
     id: String,
     role: String,
-
     sender: Arc<Mutex<SplitSink<WebSocket, Message>>>,
 }
 

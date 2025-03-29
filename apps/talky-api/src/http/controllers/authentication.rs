@@ -4,12 +4,12 @@ use sqlx::{Pool, Postgres};
 use rspc::Router;
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use talky_auth::JwtService;
+use talky_data::models::user::User;
 
 use crate::{
     error::{AppError, AppResult},
     http::context::Ctx,
-    models::user::User,
-    services::jwt::JwtService,
 };
 
 #[derive(Type, Serialize)]
@@ -20,11 +20,16 @@ pub struct AuthResponse {
 
 impl AuthResponse {
     async fn new(pool: &Pool<Postgres>, user: User) -> AppResult<AuthResponse> {
-        let jti = user.create_refresh_token(pool).await?;
+        let jti = user
+            .create_refresh_token(pool)
+            .await
+            .map_err(|m| AppError::InternalServerError(m.to_string()))?;
 
         Ok(AuthResponse {
-            access_token: JwtService::create_for_user(&user, None)?,
-            refresh_token: JwtService::create_for_user(&user, Some(jti))?,
+            access_token: JwtService::create_for_user(&user, None)
+                .map_err(|m| AppError::InternalServerError(m.to_string()))?,
+            refresh_token: JwtService::create_for_user(&user, Some(jti))
+                .map_err(|m| AppError::InternalServerError(m.to_string()))?,
         })
     }
 }

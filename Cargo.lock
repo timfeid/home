@@ -4567,9 +4567,9 @@ dependencies = [
 
 [[package]]
 name = "rsa"
-version = "0.9.7"
+version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47c75d7c5c6b673e58bf54d8544a9f432e3a925b0e80f7cd3602ab5c50c55519"
+checksum = "78928ac1ed176a5ca1d17e578a1825f3d81ca54cf41053a592584b020cfd691b"
 dependencies = [
  "const-oid",
  "digest",
@@ -4804,6 +4804,8 @@ dependencies = [
  "serde_json",
  "specta",
  "sqlx",
+ "talky-auth",
+ "talky-data",
  "textwrap",
  "thiserror 2.0.12",
  "tokio",
@@ -5727,6 +5729,26 @@ dependencies = [
  "pkg-config",
  "toml",
  "version-compare",
+]
+
+[[package]]
+name = "talky-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "jsonwebtoken",
+ "serde",
+ "talky-data",
+]
+
+[[package]]
+name = "talky-data"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bcrypt",
+ "sqlx",
+ "uuid",
 ]
 
 [[package]]

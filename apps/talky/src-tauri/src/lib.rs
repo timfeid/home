@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use bytemuck::cast_slice;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{BufferSize, SampleRate, StreamConfig};
+use cpal::{BufferSize, SampleRate, StreamConfig, SupportedStreamConfig};
 use futures_util::{SinkExt, StreamExt};
 use opus::{Application, Channels, Encoder};
 use serde::{Deserialize, Serialize};
@@ -31,7 +31,7 @@ use webrtc::track::track_local::TrackLocal;
 pub struct AudioCaptureConfig {
     pub sample_rate: u32,
     pub channels: u16,
-    pub buffer_size: usize,
+    pub buffer_size: u32,
     pub capture_mode: CaptureMode,
     pub voice_activity_threshold: f32,
 }
@@ -51,7 +51,7 @@ pub struct AudioProcessor {
 impl AudioProcessor {
     pub fn new(config: AudioCaptureConfig) -> Result<Self> {
         let opus_encoder = Encoder::new(
-            48000,
+            config.sample_rate,
             match config.channels {
                 1 => Channels::Mono,
                 2 => Channels::Stereo,
@@ -148,9 +148,13 @@ impl WebRTCManager {
             .default_input_device()
             .context("No input device available")?;
 
-        let config = input_device.default_input_config()?;
+        let supported_config = input_device.default_input_config()?;
+
+        let use_stereo = supported_config.channels() == 2;
+        let channels = if use_stereo { 2 } else { 1 };
+
         let stream_config = StreamConfig {
-            channels: 2,
+            channels,
             sample_rate: SampleRate(48000),
             buffer_size: BufferSize::Fixed(1024),
         };
@@ -161,16 +165,13 @@ impl WebRTCManager {
         let capture_control = Arc::clone(&self.capture_control);
         let cancellation_token = self.cancellation_token.clone();
 
-        // Spawn processing task
         tokio::spawn(async move {
             println!("Audio processing task started");
             let mut buffer: Vec<f32> = Vec::new();
-            let mut samples_processed = 0;
 
-            // Determine the frame size expected by Opus
-            let frame_size = match audio_processor.config.channels {
-                1 => 960,  // 20ms @ 48kHz mono
-                2 => 1920, // 20ms @ 48kHz stereo
+            let frame_size = match channels {
+                1 => 960,
+                2 => 1920,
                 _ => {
                     eprintln!("Unsupported channel count");
                     return;
@@ -184,12 +185,10 @@ impl WebRTCManager {
                 }
 
                 buffer.extend_from_slice(&chunk);
-                samples_processed += chunk.len();
 
-                while buffer.len() >= 1920 {
+                while buffer.len() >= frame_size {
                     let frame_f32: Vec<f32> = buffer.drain(..frame_size).collect();
 
-                    // Capture mode logic
                     let capture_control_guard = capture_control.lock().await;
                     let should_send = audio_processor.should_send_audio(
                         &frame_f32,
@@ -200,19 +199,11 @@ impl WebRTCManager {
                         continue;
                     }
 
-                    // Convert float to i16 for Opus
                     let frame_i16: Vec<i16> = frame_f32
                         .iter()
                         .map(|&s| (s * 32767.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16)
                         .collect();
 
-                    println!("DEBUG: First few samples: {:?}", &frame_i16[0..10]); // Check the i16 values
-
-                    println!("DEBUG: Frame size: {}", frame_size);
-                    println!(
-                        "DEBUG: Input sample rate: {}",
-                        audio_processor.config.sample_rate
-                    );
                     let mut opus_buffer = vec![0u8; 4000];
                     let encoded_bytes = {
                         let mut encoder = audio_processor.opus_encoder.lock().await;
@@ -225,8 +216,6 @@ impl WebRTCManager {
                         }
                     };
 
-                    println!("DEBUG: First few i16 samples: {:?}", &frame_i16[0..10]);
-
                     let sample = Sample {
                         data: Bytes::copy_from_slice(&opus_buffer[..encoded_bytes]),
                         timestamp: SystemTime::now(),
@@ -238,30 +227,17 @@ impl WebRTCManager {
 
                     if let Err(e) = audio_track.write_sample(&sample).await {
                         eprintln!("Error writing audio sample: {:?}", e);
-                    } else {
-                        println!("✅ Sent {} bytes of Opus", encoded_bytes);
                     }
                 }
             }
-
-            println!(
-                "Audio processing task ended after processing {} samples",
-                samples_processed
-            );
         });
 
         let sender = tx.clone();
         let stream = input_device.build_input_stream(
             &stream_config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                println!("Audio callback called with {} samples", data.len());
-                match sender.try_send(data.to_vec()) {
-                    Ok(_) => {
-                        println!("Successfully sent samples to processing task");
-                    }
-                    Err(e) => {
-                        eprintln!("Audio channel is full, dropping samples: {:?}", e);
-                    }
+                if let Err(e) = sender.try_send(data.to_vec()) {
+                    eprintln!("Audio channel is full, dropping samples: {:?}", e);
                 }
             },
             |err| eprintln!("Audio input stream error: {:?}", err),
@@ -271,7 +247,6 @@ impl WebRTCManager {
         stream.play()?;
         println!("Started audio capture");
 
-        // Wrap the stream in an Arc to extend its lifetime
         Ok(Arc::new(stream))
     }
 
@@ -435,120 +410,119 @@ impl WebRTCManager {
             loop {
                 println!("DEBUG: Top of loop");
                 tokio::select! {
-                                    _ = cancellation_token_clone.cancelled() => {
-                                        println!("CRITICAL: WebSocket receiver loop cancelled");
-                                        break;
-                                    }
-                                    Some(msg_result) = ws_receiver.next() => {
-                                        println!("DEBUG: Received a message in stream");
-                                        match msg_result {
-                                            Ok(msg) => {
-                                                println!("DEBUG: Message is Ok");
-                                                match msg {
-                                                    Message::Text(text) => {
-                                                        println!("VERBOSE: Received WebSocket text message: {}", text);
+                    _ = cancellation_token_clone.cancelled() => {
+                        println!("CRITICAL: WebSocket receiver loop cancelled");
+                        break;
+                    }
+                    Some(msg_result) = ws_receiver.next() => {
+                        println!("DEBUG: Received a message in stream");
+                        match msg_result {
+                            Ok(msg) => {
+                                println!("DEBUG: Message is Ok");
+                                match msg {
+                                    Message::Text(text) => {
+                                        println!("VERBOSE: Received WebSocket text message: {}", text);
 
-                                                        match serde_json::from_str::<Value>(&text) {
-                                                            Ok(json_msg) => {
-                                                                println!("VERBOSE: Parsed JSON message: {:#?}", json_msg);
+                                        match serde_json::from_str::<Value>(&text) {
+                                            Ok(json_msg) => {
+                                                println!("VERBOSE: Parsed JSON message: {:#?}", json_msg);
 
-                                                                match json_msg.get("type").and_then(|t| t.as_str()) {
-                                                                    Some("active_clients") => {
-                                                                        println!("INFO: Received active_clients message.");
-                                                                        if let Some(clients) = json_msg.get("clients").and_then(|v| v.as_array()) {
-                                                                            println!("DEBUG: Clients array: {:?}", clients);
-                                                                            if clients.iter().any(|c| c.get("role") == Some(&json!("answerer"))) {
-                                                                                println!("INFO: Answerer detected, attempting to send offer...");
-                                                                                if let Some(local_desc) = pc_clone.local_description().await {
-                                                                                    let offer_msg = json!({
-                                                                                        "type": "offer",
-                                                                                        "offer": local_desc.sdp,
-                                                                                        "join_code": join_code.clone()
-                                                                                    })
-                                                                                    .to_string();
+                                                match json_msg.get("type").and_then(|t| t.as_str()) {
+                                                    Some("active_clients") => {
+                                                        println!("INFO: Received active_clients message.");
+                                                        if let Some(clients) = json_msg.get("clients").and_then(|v| v.as_array()) {
+                                                            println!("DEBUG: Clients array: {:?}", clients);
+                                                            if clients.iter().any(|c| c.get("role") == Some(&json!("answerer"))) {
+                                                                println!("INFO: Answerer detected, attempting to send offer...");
+                                                                if let Some(local_desc) = pc_clone.local_description().await {
+                                                                    let offer_msg = json!({
+                                                                        "type": "offer",
+                                                                        "offer": local_desc.sdp,
+                                                                        "join_code": join_code.clone()
+                                                                    })
+                                                                    .to_string();
 
-                                                                                    println!("DEBUG: Offer message: {}", offer_msg);
-                                                                                    match ws_sender_clone.lock().await.send(Message::Text(offer_msg.into())).await {
-                                                                                        Ok(_) => println!("INFO: Offer sent successfully"),
-                                                                                        Err(e) => eprintln!("ERROR: Failed to send offer: {:?}", e),
-                                                                                    }
-                                                                                } else {
-                                                                                    println!("WARNING: No local description available");
-                                                                                }
-                                                                            } else {
-                                                                                println!("DEBUG: No answerer found in clients");
-                                                                            }
-                                                                        } else {
-                                                                            println!("WARNING: No clients array in message");
-                                                                        }
+                                                                    println!("DEBUG: Offer message: {}", offer_msg);
+                                                                    match ws_sender_clone.lock().await.send(Message::Text(offer_msg.into())).await {
+                                                                        Ok(_) => println!("INFO: Offer sent successfully"),
+                                                                        Err(e) => eprintln!("ERROR: Failed to send offer: {:?}", e),
                                                                     }
-                                                                    Some("answer") => {
-                 if let Some( answer) = json_msg.get("answer").and_then(|v| v.as_str()) {
-
-                                            println!("Received SDP answer");
-                                            let answer = RTCSessionDescription::answer(answer.to_string()).unwrap();
-
-                                            match pc_clone.set_remote_description(answer).await {
-                                                Ok(_) => println!("Set remote description successfully"),
-                                                Err(e) => println!("Error setting remote description: {:?}", e),
-                                            }
-                }
-                                                                    }
-                                                                    Some("candidate") => {
-                                                                        println!("INFO: Received ICE candidate");
-                                                                        if let Some(candidate_obj) = json_msg.get("candidate") {
-                                                                            match serde_json::from_str::<RTCIceCandidateInit>(
-                                                                                &serde_json::to_string(candidate_obj).unwrap()
-                                                                            ) {
-                                                                                Ok(candidate_init) => {
-                                                                                    if let Err(e) = pc_clone.add_ice_candidate(candidate_init).await {
-                                                                                        eprintln!("ERROR: Adding ICE candidate failed: {:?}", e);
-                                                                                    }
-                                                                                }
-                                                                                Err(e) => eprintln!("ERROR: Parsing ICE candidate failed: {:?}", e),
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                    _ => {
-                                                                        println!("WARNING: Unhandled message type: {}",
-                                                                            json_msg.get("type").and_then(|t| t.as_str()).unwrap_or("unknown"));
-                                                                    }
+                                                                } else {
+                                                                    println!("WARNING: No local description available");
                                                                 }
-                                                            },
-                                                            Err(e) => {
-                                                                eprintln!("ERROR: Failed to parse JSON message: {:?}", e);
-                                                                eprintln!("RAW message content: {}", text);
+                                                            } else {
+                                                                println!("DEBUG: No answerer found in clients");
+                                                            }
+                                                        } else {
+                                                            println!("WARNING: No clients array in message");
+                                                        }
+                                                    }
+                                                    Some("answer") => {
+                                                        if let Some(answer) = json_msg.get("answer").and_then(|v| v.as_str()) {
+
+                                                            println!("Received SDP answer");
+                                                            let answer = RTCSessionDescription::answer(answer.to_string()).unwrap();
+
+                                                            match pc_clone.set_remote_description(answer).await {
+                                                                Ok(_) => println!("Set remote description successfully"),
+                                                                Err(e) => println!("Error setting remote description: {:?}", e),
                                                             }
                                                         }
-                                                    },
-                                                    Message::Ping(ping_data) => {
-                                                        println!("INFO: Received Ping, sending Pong");
-                                                        if let Err(e) = ws_sender_clone.lock().await.send(Message::Pong(ping_data)).await {
-                                                            eprintln!("ERROR: Sending Pong failed: {:?}", e);
-                                                            break;
+                                                    }
+                                                    Some("candidate") => {
+                                                        println!("INFO: Received ICE candidate");
+                                                        if let Some(candidate_obj) = json_msg.get("candidate") {
+                                                            match serde_json::from_str::<RTCIceCandidateInit>(
+                                                                &serde_json::to_string(candidate_obj).unwrap()
+                                                            ) {
+                                                                Ok(candidate_init) => {
+                                                                    if let Err(e) = pc_clone.add_ice_candidate(candidate_init).await {
+                                                                        eprintln!("ERROR: Adding ICE candidate failed: {:?}", e);
+                                                                    }
+                                                                }
+                                                                Err(e) => eprintln!("ERROR: Parsing ICE candidate failed: {:?}", e),
+                                                            }
                                                         }
-                                                    },
-                                                    Message::Close(_) => {
-                                                        println!("INFO: WebSocket connection closed");
-                                                        break;
-                                                    },
+                                                    }
                                                     _ => {
-                                                        println!("WARNING: Received unhandled message type");
+                                                        println!("WARNING: Unhandled message type: {}",
+                                                            json_msg.get("type").and_then(|t| t.as_str()).unwrap_or("unknown"));
                                                     }
                                                 }
                                             },
                                             Err(e) => {
-                                                eprintln!("ERROR: WebSocket stream error: {:?}", e);
-                                                break;
+                                                eprintln!("ERROR: Failed to parse JSON message: {:?}", e);
+                                                eprintln!("RAW message content: {}", text);
                                             }
                                         }
-                                    }
-                                    else => {
-
-                                        tokio::time::sleep(Duration::from_millis(100)).await;
-                                        println!("TRACE: Idle loop iteration");
+                                    },
+                                    Message::Ping(ping_data) => {
+                                        println!("INFO: Received Ping, sending Pong");
+                                        if let Err(e) = ws_sender_clone.lock().await.send(Message::Pong(ping_data)).await {
+                                            eprintln!("ERROR: Sending Pong failed: {:?}", e);
+                                            break;
+                                        }
+                                    },
+                                    Message::Close(_) => {
+                                        println!("INFO: WebSocket connection closed");
+                                        break;
+                                    },
+                                    _ => {
+                                        println!("WARNING: Received unhandled message type");
                                     }
                                 }
+                            },
+                            Err(e) => {
+                                eprintln!("ERROR: WebSocket stream error: {:?}", e);
+                                break;
+                            }
+                        }
+                    }
+                    else => {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        println!("TRACE: Idle loop iteration");
+                    }
+                }
             }
 
             println!("CRITICAL: WebSocket receiver loop terminated");

@@ -16,7 +16,6 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use rusty::{
-    database::create_connection,
     http::{context::Ctx, routers::mount},
     lobby::manager::LobbyManager,
 };
@@ -26,6 +25,7 @@ use rusty::{
 // use lobby::manager::LobbyManager;
 // use services::jwt::{Claims, JwtService};
 use sqlx::{Executor, Pool, Postgres};
+use talky_data::database::create_connection;
 use tokio::sync::{broadcast, Mutex};
 
 use rspc::Router;

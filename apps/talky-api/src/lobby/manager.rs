@@ -1,6 +1,7 @@
 use chrono::Utc;
 use futures::stream::StreamExt;
 use sqlx::types::time::{Date, PrimitiveDateTime};
+use talky_auth::Claims;
 use tokio_stream::wrappers::BroadcastStream;
 
 use futures::{future, Stream};
@@ -24,7 +25,6 @@ use tokio::sync::Mutex;
 use super::lobby::{self, Lobby, LobbyCommand, LobbyData, PresenceMember};
 use crate::error::{AppError, AppResult};
 use crate::lobby::lobby::LobbyCommandWrapper;
-use crate::services::jwt::{Claims, JwtService};
 
 #[derive(Clone)]
 pub struct LobbyManager {

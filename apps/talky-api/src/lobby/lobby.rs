@@ -81,14 +81,12 @@ impl Lobby {}
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use talky_auth::Claims;
 use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
 use ulid::Ulid;
 
-use crate::{
-    error::{AppError, AppResult},
-    services::jwt::Claims,
-};
+use crate::error::{AppError, AppResult};
 
 use super::manager::LobbyManager;
 
@@ -128,9 +126,10 @@ impl Lobby {
 mod test {
     use std::{cell::RefCell, rc::Rc};
 
+    use talky_auth::Claims;
     use tokio_stream::StreamExt;
 
-    use crate::{lobby::lobby::Lobby, services::jwt::Claims};
+    use crate::lobby::lobby::Lobby;
 
     #[tokio::test]
     async fn test() {

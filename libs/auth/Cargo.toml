@@ -1,0 +1,13 @@
+[package]
+name = "talky-auth"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+jsonwebtoken = "9.3.1"
+serde = { workspace = true }
+talky-data = { path = "../data" }
+
+[lib]
+path = "lib.rs"
