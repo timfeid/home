@@ -9,10 +9,8 @@
 	import Layout from './layout.svelte';
 	import type { LobbyData, LobbyPresenceData } from './lobby';
 
-	// Declare joinCode as a prop.
 	export let joinCode: string;
 
-	// Local reactive variables.
 	let presence: LobbyPresenceData | undefined = undefined;
 	let lobby: LobbyData | undefined = undefined;
 	let unsubscribe: (() => void) | undefined;
@@ -53,23 +51,21 @@
 		}
 	}
 
-	// Global variables for the RTCPeerConnection and soundhouse channel.
 	let peerConnection: RTCPeerConnection | null = null;
 	let signalingChannel: WebSocket | null = null;
 	let audioElement: HTMLAudioElement;
 
-	// Sets up the persistent soundhouse channel.
 	function setupSocket() {
 		let joinCode = 'room1';
 		console.log('[Signaling] Connecting to ws://localhost:8080/soundhouse ...');
 		signalingChannel = new WebSocket('ws://localhost:8080/soundhouse');
 
 		signalingChannel.onopen = () => {
-			// Identify this client as an answerer.
 			const initMsg = {
 				join_code: joinCode,
 				auth_code: user.accessToken,
 				role: 'answerer',
+				type: 'init',
 			};
 			signalingChannel?.send(JSON.stringify(initMsg));
 			console.log('[Signaling] Sent init message:', initMsg);
@@ -108,7 +104,6 @@
 			} else if (message.candidate) {
 				console.log('[Signaling] Received ICE Candidate:', message.candidate);
 				try {
-					// Validate that candidate fields exist before constructing the RTCIceCandidate.
 					if (
 						message.candidate.candidate &&
 						message.candidate.sdpMid != null &&
@@ -140,7 +135,6 @@
 		};
 	}
 
-	// Start the WebRTC connection as answerer.
 	async function startWebRTC() {
 		console.log('[WebRTC] Starting as answerer...');
 		peerConnection = new RTCPeerConnection({
@@ -165,17 +159,14 @@
 			}
 		};
 
-		// Add this to monitor connection state
 		peerConnection.onconnectionstatechange = () => {
 			console.log(`[WebRTC] Connection State: ${peerConnection?.connectionState}`);
 		};
 
-		// Add this to monitor soundhouse state
 		peerConnection.onsignalingstatechange = () => {
 			console.log(`[WebRTC] Signaling State: ${peerConnection?.signalingState}`);
 		};
 
-		// When remote media is received, attach it to the audio element.
 		peerConnection.ontrack = (event) => {
 			console.log('[WebRTC] Received remote track event:', event);
 			let stream: MediaStream;
@@ -187,17 +178,16 @@
 			console.log('[WebRTC] Received stream:', stream);
 			console.log('[WebRTC] Audio tracks in stream:', stream.getAudioTracks());
 
-			// Attach stream to the audio element.
 			console.log(stream);
 			audioElement.srcObject = stream;
 			audioElement.volume = 1.0;
-			audioElement.muted = false; // ensure not muted
+			audioElement.muted = false;
 
 			audioElement
 				.play()
 				.then(() => {
 					console.log('[WebRTC] Audio playback started successfully.');
-					// Use Web Audio API to analyze the stream.
+
 					const audioCtx = new AudioContext();
 					const source = audioCtx.createMediaStreamSource(stream);
 					const analyser = audioCtx.createAnalyser();
@@ -208,7 +198,7 @@
 					const dataArray = new Uint8Array(bufferLength);
 					function draw() {
 						analyser.getByteFrequencyData(dataArray);
-						// Log average volume (or analyze the data in another way)
+
 						const avg = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
 						console.log('[Audio Analyser] Average volume:', avg);
 						requestAnimationFrame(draw);
@@ -220,9 +210,8 @@
 				});
 		};
 
-		// Set up the soundhouse channel.
 		setupSocket();
-		reportStats();
+
 		console.log('[WebRTC] Waiting for remote offer from the test client...');
 	}
 
@@ -237,7 +226,6 @@
 		setTimeout(reportStats, 1000);
 	}
 
-	// Stop WebRTC and clean up.
 	function stopWebRTC() {
 		console.log('[WebRTC] Stopping WebRTC connection...');
 		if (peerConnection) {
@@ -254,14 +242,8 @@
 	}
 
 	onMount(() => {
-		// Subscribe to lobby updates.
 		getLobby(joinCode);
 		doSomething();
-
-		// Automatically start WebRTC as answerer.
-		// startWebRTC().catch((error) => {
-		// 	console.error('[WebRTC] Error starting WebRTC:', error);
-		// });
 	});
 
 	onDestroy(() => {
@@ -271,7 +253,6 @@
 		stopWebRTC();
 	});
 
-	// Reactive update if joinCode changes.
 	$: if (joinCode) {
 		getLobby(joinCode);
 	}

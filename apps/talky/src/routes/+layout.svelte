@@ -1,21 +1,16 @@
 <script lang="ts">
-	import { dev } from '$app/environment';
-	import { injectAnalytics } from '@vercel/analytics/sveltekit';
-	import { injectSpeedInsights } from '@vercel/speed-insights/sveltekit';
 	import { onMount } from 'svelte';
 	import '../app.css';
-	import { client } from '../lib/client';
 	import { user } from '../lib/user.svelte';
+	import { setupPresence } from '../lib/presence.svelte';
 
-	injectSpeedInsights();
-	injectAnalytics({ mode: dev ? 'development' : 'production' });
+	onMount(() => {
+		const presence = setupPresence(user);
+		return () => presence.cleanup();
+	});
 
 	onMount(async () => {
-		const response = await client.auth_login.mutate({ username: 'tim', password: 'wat' });
-		if (response.status !== 'ok') {
-			return;
-		}
-		user.accessToken = response.data.access_token;
+		await user.login({ username: 'tim', password: 'wat' });
 	});
 
 	let { children } = $props();
