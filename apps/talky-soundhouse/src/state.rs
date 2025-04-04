@@ -16,6 +16,18 @@ pub struct ClientInfo {
     pub sender: ClientSender,
 }
 
+impl ClientInfo {
+    pub async fn send(&self, message: &OutgoingMessage) -> AppResult<()> {
+        self.sender.lock().await.send(
+            message
+                .to_ws_message()
+                .map_err(|e| AppError::Anyhow(anyhow::Error::msg(e)))?,
+        );
+
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 pub struct Room {
     pub clients: HashMap<String, ClientInfo>,
@@ -131,65 +143,56 @@ impl AppState {
         self.rooms.lock().await
     }
 
-    pub async fn add_client_to_room(
-        &self,
-        join_code: String,
-        client_info: ClientInfo,
-    ) -> AppResult<()> {
-        let mut rooms_guard = self.rooms_lock().await;
-        let room = rooms_guard.entry(join_code.clone()).or_default();
-
-        let client_id = client_info.id.clone();
-        if !room.add_client(client_info) {
-            tracing::warn!(
-                "Client ID {} already exists in room {}",
-                client_id,
-                join_code
-            );
-        }
-
-        tracing::info!("Client {} added to room '{}'", client_id, join_code);
-
-        self.broadcast_active_clients(&join_code, room).await;
+    pub async fn add_client(&self, client_info: ClientInfo) -> AppResult<()> {
+        self.clients
+            .lock()
+            .await
+            .insert(client_info.id.clone(), client_info.clone());
 
         Ok(())
     }
 
+    pub async fn remove_client(&self, client_id: &str) {
+        self.clients.lock().await.remove(client_id);
+    }
+
+    pub async fn send_to_client(
+        &self,
+        client_id: &str,
+        message: &OutgoingMessage,
+    ) -> AppResult<()> {
+        match self.clients.lock().await.get(client_id) {
+            Some(client) => client.send(message).await,
+            _ => Err(AppError::Anyhow(anyhow::anyhow!("Client not found."))),
+        }
+    }
+
     pub async fn handle_webrtc_signal(
         &self,
-        join_code: &str,
         sender_client_id: &str,
         target_client_id: &str,
         signal_data: serde_json::Value,
     ) -> AppResult<()> {
         let rooms_guard = self.rooms_lock().await;
-        if let Some(room) = rooms_guard.get(join_code) {
-            let message = OutgoingMessage::WebRtcSignal {
-                sender_client_id: (*sender_client_id).to_string(),
-                signal_data,
-            };
+        let message = OutgoingMessage::WebRtcSignal {
+            sender_client_id: (*sender_client_id).to_string(),
+            signal_data,
+        };
 
-            if let Err(e) = room.send_to_client(target_client_id, &message).await {
-                tracing::error!(
-                    "Failed to relay WebRTC signal from {} to {}: {:?}",
-                    sender_client_id,
-                    target_client_id,
-                    e
-                );
+        if let Err(e) = self.send_to_client(target_client_id, &message).await {
+            tracing::error!(
+                "Failed to relay WebRTC signal from {} to {}: {:?}",
+                sender_client_id,
+                target_client_id,
+                e
+            );
 
-                return Err(e);
-            } else {
-                tracing::debug!(
-                    "Relayed WebRTC signal from {} to {}",
-                    sender_client_id,
-                    target_client_id
-                );
-            }
+            return Err(e);
         } else {
-            tracing::warn!(
-                "Cannot relay WebRTC signal: Room '{}' not found for sender {}",
-                join_code,
-                sender_client_id
+            tracing::debug!(
+                "Relayed WebRTC signal from {} to {}",
+                sender_client_id,
+                target_client_id
             );
         }
         Ok(())
@@ -216,40 +219,6 @@ impl AppState {
                 join_code,
                 sender_id
             );
-        }
-    }
-
-    pub async fn remove_client_from_room(&self, join_code: &str, client_id: &str) {
-        let mut rooms_guard = self.rooms_lock().await;
-        let mut room_removed = false;
-
-        if let Some(room) = rooms_guard.get_mut(join_code) {
-            if room.remove_client(client_id).is_some() {
-                tracing::info!("Client {} removed from room '{}'", client_id, join_code);
-
-                if room.clients.is_empty() {
-                    room_removed = true;
-                    tracing::info!("Room '{}' is empty, removing.", join_code);
-                } else {
-                    self.broadcast_active_clients(join_code, room).await;
-                }
-            } else {
-                tracing::warn!(
-                    "Attempted to remove non-existent client {} from room {}",
-                    client_id,
-                    join_code
-                );
-            }
-        } else {
-            tracing::warn!(
-                "Attempted to remove client {} from non-existent room {}",
-                client_id,
-                join_code
-            );
-        }
-
-        if room_removed {
-            rooms_guard.remove(join_code);
         }
     }
 

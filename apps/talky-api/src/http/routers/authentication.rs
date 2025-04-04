@@ -12,9 +12,11 @@ use super::BaseProcedure;
 pub fn create_authentication_router() -> Router<Ctx> {
     Router::<Ctx>::new()
         .procedure("auth_refresh_token", {
-            <BaseProcedure>::builder().query(AuthenticationController::refresh_token)
+            <BaseProcedure>::builder()
+                .query(|ctx, token: String| AuthenticationController::new(ctx).refresh_token(token))
         })
         .procedure("auth_login", {
-            <BaseProcedure>::builder().mutation(AuthenticationController::login)
+            <BaseProcedure>::builder()
+                .mutation(|ctx, args: LoginArgs| AuthenticationController::new(ctx).login(args))
         })
 }

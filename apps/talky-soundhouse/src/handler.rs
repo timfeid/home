@@ -6,7 +6,6 @@ use std::sync::Arc;
 use talky_auth::JwtService;
 use tokio::sync::Mutex;
 use ulid::Ulid;
-use uuid::Uuid;
 use warp::ws::{Message, WebSocket};
 
 pub async fn handle_connection(ws: WebSocket, state: AppState) {
@@ -14,60 +13,30 @@ pub async fn handle_connection(ws: WebSocket, state: AppState) {
 
     let (sender, receiver) = ws.split();
     let sender = Arc::new(Mutex::new(sender));
-
     let mut receiver = receiver.map_err(AppError::WebSocket);
 
-    let (client_id, join_code, initial_client_info) =
-        match handle_initialization(&mut receiver, sender.clone(), state.clone()).await {
-            Ok(info) => info,
-            Err(e) => {
-                tracing::error!("Initialization failed: {:?}", e);
-
-                let close_msg = e.to_ws_close_message();
-                let _ = sender.lock().await.send(close_msg).await;
-
-                return;
-            }
-        };
-
-    tracing::info!("Client {} initialized for room '{}'", client_id, join_code);
-
-    if let Err(e) = state
-        .add_client_to_room(join_code.clone(), initial_client_info)
-        .await
-    {
-        tracing::error!(
-            "Failed to add client {} to room {}: {:?}",
-            client_id,
-            join_code,
-            e
-        );
-
-        let err_msg = OutgoingMessage::Error {
-            message: format!("Failed to join room: {:?}", e),
-        };
-        let _ = sender
-            .lock()
-            .await
-            .send(
-                err_msg
-                    .to_ws_message()
-                    .unwrap_or(Message::text("Error joining room")),
-            )
-            .await;
-        let _ = sender.lock().await.close().await;
+    if let Err(e) = initialize_client(&mut receiver, sender.clone(), state.clone()).await {
+        tracing::error!("Initialization error: {:?}", e);
+        let close_msg = e.to_ws_close_message();
+        let _ = sender.lock().await.send(close_msg).await;
         return;
     }
+}
 
-    if let Err(e) = message_loop(
-        receiver,
-        sender.clone(),
-        state.clone(),
-        &join_code,
-        &client_id,
-    )
-    .await
-    {
+async fn initialize_client(
+    receiver: &mut (impl StreamExt<Item = AppResult<Message>> + Unpin),
+    sender: ClientSender,
+    state: AppState,
+) -> AppResult<()> {
+    let (client_id, initial_client_info) =
+        validate_initialization(receiver, sender.clone()).await?;
+
+    if let Err(e) = state.add_client(initial_client_info).await {
+        handle_client_error(sender, client_id.clone(), e).await;
+        return Ok(());
+    }
+
+    if let Err(e) = handle_messages(receiver, sender.clone(), state.clone(), &client_id).await {
         tracing::error!(
             "Error during message loop for client {}: {:?}",
             client_id,
@@ -75,19 +44,15 @@ pub async fn handle_connection(ws: WebSocket, state: AppState) {
         );
     }
 
-    tracing::info!(
-        "Client {} disconnected from room '{}'",
-        client_id,
-        join_code
-    );
-    state.remove_client_from_room(&join_code, &client_id).await;
+    tracing::info!("Client {} disconnected", client_id);
+    state.remove_client(&client_id).await;
+    Ok(())
 }
 
-async fn handle_initialization(
+async fn validate_initialization(
     receiver: &mut (impl StreamExt<Item = AppResult<Message>> + Unpin),
     sender: ClientSender,
-    state: AppState,
-) -> AppResult<(String, String, ClientInfo)> {
+) -> AppResult<(String, ClientInfo)> {
     let init_msg = receiver
         .next()
         .await
@@ -105,26 +70,7 @@ async fn handle_initialization(
     })?;
 
     let init_data: IncomingMessage = serde_json::from_str(init_text).map_err(AppError::Json)?;
-
-    let (join_code, auth_code, role) = match init_data {
-        IncomingMessage::Init {
-            join_code,
-            auth_code,
-            role,
-        } => {
-            if join_code.is_empty() || auth_code.is_empty() || role.is_empty() {
-                return Err(AppError::InitializationError(
-                    "join_code, auth_code, and role cannot be empty".to_string(),
-                ));
-            }
-            (join_code, auth_code, role)
-        }
-        _ => {
-            return Err(AppError::InitializationError(
-                "First message must be of type 'init'".to_string(),
-            ));
-        }
-    };
+    let auth_code = parse_init_data(init_data)?;
 
     let token_data = JwtService::decode(&auth_code)?;
     tracing::debug!(
@@ -136,94 +82,132 @@ async fn handle_initialization(
     let client_info = ClientInfo {
         id: client_id.clone(),
         user_id: token_data.claims.sub,
-        role,
+        role: "presence".to_string(),
         sender,
     };
 
-    Ok((client_id, join_code, client_info))
+    Ok((client_id, client_info))
 }
 
-async fn message_loop(
+fn parse_init_data(init_data: IncomingMessage) -> AppResult<String> {
+    match init_data {
+        IncomingMessage::Init { auth_code } => {
+            if auth_code.is_empty() {
+                return Err(AppError::InitializationError(
+                    "auth_code cannot be empty".to_string(),
+                ));
+            }
+            Ok(auth_code)
+        }
+        _ => Err(AppError::InitializationError(
+            "First message must be of type 'init'".to_string(),
+        )),
+    }
+}
+
+async fn handle_client_error(sender: ClientSender, client_id: String, error: AppError) {
+    tracing::error!("Failed to add client {} : {:?}", client_id, error);
+
+    let err_msg = OutgoingMessage::Error {
+        message: format!("Failed to join room: {:?}", error),
+    };
+    let _ = sender
+        .lock()
+        .await
+        .send(
+            err_msg
+                .to_ws_message()
+                .unwrap_or(Message::text("Error joining room")),
+        )
+        .await;
+    let _ = sender.lock().await.close().await;
+}
+
+async fn handle_messages(
     mut receiver: impl StreamExt<Item = AppResult<Message>> + Unpin,
     sender: ClientSender,
     state: AppState,
-    join_code: &str,
     client_id: &str,
 ) -> AppResult<()> {
     let role = {
         let rooms_guard = state.rooms.lock().await;
         rooms_guard
-            .get(join_code)
-            .and_then(|r| r.clients.get(client_id).map(|c| c.role.clone()))
+            .values()
+            .find_map(|r| r.clients.get(client_id).map(|c| c.role.clone()))
             .unwrap_or_else(|| "unknown".to_string())
     };
 
     while let Some(message_result) = receiver.next().await {
-        match message_result {
-            Ok(msg) => {
-                if msg.is_text() {
-                    let text = msg.to_str().unwrap_or("");
-                    match handle_text_message(text, &state, join_code, client_id, &role).await {
-                        Ok(_) => {}
-                        Err(e) => {
-                            tracing::warn!(
-                                "Error processing message from client {}: {:?}",
-                                client_id,
-                                e
-                            );
-
-                            let err_msg = OutgoingMessage::Error {
-                                message: format!("Error processing message: {:?}", e),
-                            };
-                            let _ = sender
-                                .lock()
-                                .await
-                                .send(
-                                    err_msg
-                                        .to_ws_message()
-                                        .unwrap_or(Message::text("Processing error")),
-                                )
-                                .await;
-                        }
-                    }
-                } else if msg.is_binary() {
-                    tracing::debug!("Received binary message from {}", client_id);
-                } else if msg.is_ping() {
-                    tracing::trace!("Received Ping from {}", client_id);
-
-                    if let Err(e) = sender
-                        .lock()
-                        .await
-                        .send(Message::pong(msg.into_bytes()))
-                        .await
-                    {
-                        tracing::warn!("Failed to send Pong to {}: {}", client_id, e);
-
-                        return Err(AppError::ClientSendError);
-                    }
-                } else if msg.is_pong() {
-                    tracing::trace!("Received Pong from {}", client_id);
-                } else if msg.is_close() {
-                    tracing::info!("Received close frame from client {}", client_id);
-
-                    return Ok(());
-                }
-            }
-            Err(e) => {
-                tracing::error!("WebSocket read error for client {}: {:?}", client_id, e);
-                return Err(e);
-            }
-        }
+        process_message(message_result, sender.clone(), &state, client_id, &role).await?;
     }
 
     tracing::info!("Client {} connection stream ended.", client_id);
     Ok(())
 }
 
+async fn process_message(
+    message_result: AppResult<Message>,
+    sender: ClientSender,
+    state: &AppState,
+    client_id: &str,
+    role: &str,
+) -> AppResult<()> {
+    match message_result {
+        Ok(msg) if msg.is_text() => {
+            let text = msg.to_str().unwrap_or("");
+            if let Err(e) = handle_text_message(text, state, client_id, role).await {
+                let err_msg = OutgoingMessage::Error {
+                    message: format!("Error processing message: {:?}", e),
+                };
+                let _ = sender
+                    .lock()
+                    .await
+                    .send(
+                        err_msg
+                            .to_ws_message()
+                            .unwrap_or(Message::text("Processing error")),
+                    )
+                    .await;
+            }
+        }
+        Ok(msg) => process_non_text_message(msg, sender, client_id).await?,
+        Err(e) => {
+            tracing::error!("WebSocket read error for client {}: {:?}", client_id, e);
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+async fn process_non_text_message(
+    msg: Message,
+    sender: ClientSender,
+    client_id: &str,
+) -> AppResult<()> {
+    if msg.is_binary() {
+        tracing::debug!("Received binary message from {}", client_id);
+    } else if msg.is_ping() {
+        tracing::trace!("Received Ping from {}", client_id);
+        sender
+            .lock()
+            .await
+            .send(Message::pong(msg.into_bytes()))
+            .await
+            .map_err(|e| {
+                tracing::warn!("Failed to send Pong to {}: {}", client_id, e);
+                AppError::ClientSendError
+            })?;
+    } else if msg.is_pong() {
+        tracing::trace!("Received Pong from {}", client_id);
+    } else if msg.is_close() {
+        tracing::info!("Received close frame from client {}", client_id);
+    }
+    Ok(())
+}
+
 async fn handle_text_message(
     text: &str,
     state: &AppState,
-    join_code: &str,
     client_id: &str,
     client_role: &str,
 ) -> AppResult<()> {
@@ -237,17 +221,12 @@ async fn handle_text_message(
                         client_id
                     );
                 }
-                IncomingMessage::ChatMessage { content } => {
-                    state
-                        .handle_chat_message(join_code, client_id, client_role, content)
-                        .await;
-                }
                 IncomingMessage::WebRtcSignal {
                     target_client_id,
                     signal_data,
                 } => {
                     state
-                        .handle_webrtc_signal(join_code, client_id, &target_client_id, signal_data)
+                        .handle_webrtc_signal(client_id, &target_client_id, signal_data)
                         .await?;
                 }
             }

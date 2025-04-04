@@ -4,20 +4,16 @@ use axum::http::request::Parts;
 use sqlx::{Pool, Postgres};
 use talky_auth::{Claims, JwtService};
 
-use crate::{
-    error::{AppError, AppResult},
-    lobby::manager::LobbyManager,
-};
+use crate::error::{AppError, AppResult};
 
 #[derive(Debug)]
 pub struct Ctx {
     pub pool: Arc<Pool<Postgres>>,
     user: Option<Claims>,
-    pub lobby_manager: Arc<LobbyManager>,
 }
 
 impl Ctx {
-    pub fn new(pool: Arc<Pool<Postgres>>, parts: Parts, lobby_manager: Arc<LobbyManager>) -> Ctx {
+    pub fn new(pool: Arc<Pool<Postgres>>, parts: Parts) -> Ctx {
         let user = match parts.headers.get("Authorization") {
             Some(header_value) => {
                 let token_str = header_value.to_str().unwrap_or_default();
@@ -32,11 +28,7 @@ impl Ctx {
             None => None,
         };
 
-        Ctx {
-            pool,
-            user,
-            lobby_manager,
-        }
+        Ctx { pool, user }
     }
 
     pub fn required_user(self: &Ctx) -> AppResult<&Claims> {

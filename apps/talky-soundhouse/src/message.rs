@@ -1,18 +1,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IncomingMessage {
     Init {
-        join_code: String,
         auth_code: String,
-        role: String,
     },
-    ChatMessage {
-        content: String,
-    },
+    // ChatMessage {
+    //     content: String,
+    // },
     WebRtcSignal {
         target_client_id: String,
         signal_data: Value,

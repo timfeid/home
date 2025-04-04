@@ -5,7 +5,6 @@ members = [
   "apps/talky/src-tauri",
   "apps/talky-test",
   "apps/talky-soundhouse",
-  "apps/leetcode",
   "libs/auth",
   "libs/data",
 

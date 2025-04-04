@@ -15,10 +15,7 @@ use axum::{
     Extension,
 };
 use futures::{SinkExt, StreamExt};
-use rusty::{
-    http::{context::Ctx, routers::mount},
-    lobby::manager::LobbyManager,
-};
+use rusty::http::{context::Ctx, routers::mount};
 // use database::create_connection;
 // use error::{AppError, AppResult};
 // use http::routers::create_router;
@@ -39,11 +36,6 @@ struct AppState {
 async fn create_pool() -> Arc<Pool<Postgres>> {
     let database_url = dotenv::var("DATABASE_URL").unwrap();
     create_connection(&database_url).await
-}
-
-async fn create_lobby_manager() -> Arc<LobbyManager> {
-    let manager = LobbyManager::new().await.unwrap();
-    Arc::new(manager)
 }
 
 async fn ws_handler(
@@ -110,7 +102,6 @@ async fn create_app() -> axum::Router {
     let allowed_headers = [CONTENT_TYPE, AUTHORIZATION];
     let allowed_methods = [Method::GET, Method::POST, Method::OPTIONS];
     let pool = create_pool().await;
-    let lobby_manager = create_lobby_manager().await;
     let (broadcaster, _) = broadcast::channel::<Message>(100);
 
     let app_state = AppState { broadcaster };
@@ -120,7 +111,7 @@ async fn create_app() -> axum::Router {
         .nest(
             "/rspc",
             rspc_axum::endpoint(procedures, move |parts: Parts| {
-                Ctx::new(pool.clone(), parts, lobby_manager.clone())
+                Ctx::new(pool.clone(), parts)
             }),
         )
         .route("/ws", get(ws_handler))

@@ -40,12 +40,15 @@ pub struct LoginArgs {
     password: String,
 }
 
-pub struct AuthenticationController {}
+pub struct AuthenticationController {
+    ctx: Ctx,
+}
+
 impl AuthenticationController {
-    pub async fn login(ctx: Ctx, args: LoginArgs) -> AppResult<AuthResponse> {
-        if let Ok(user) = User::find(&ctx.pool, &args.username).await {
+    pub async fn login(self, args: LoginArgs) -> AppResult<AuthResponse> {
+        if let Ok(user) = User::find(&self.ctx.pool, &args.username).await {
             if user.verify_password(&args.password) {
-                return AuthResponse::new(&ctx.pool, user).await;
+                return AuthResponse::new(&self.ctx.pool, user).await;
             }
         }
 
@@ -54,19 +57,23 @@ impl AuthenticationController {
         ))
     }
 
-    pub async fn refresh_token(ctx: Ctx, token: String) -> AppResult<AuthResponse> {
+    pub async fn refresh_token(self, token: String) -> AppResult<AuthResponse> {
         let details = JwtService::decode(&token)
             .map_err(|_| AppError::BadRequest("Invalid token".to_owned()))?;
 
         if let Ok(user) = User::find_by_refresh_token(
-            &ctx.pool,
+            &self.ctx.pool,
             (&details.claims.sub, &details.claims.jti.unwrap_or_default()),
         )
         .await
         {
-            return AuthResponse::new(&ctx.pool, user).await;
+            return AuthResponse::new(&self.ctx.pool, user).await;
         }
 
         Err(AppError::BadRequest("Invalid token".to_string()))
+    }
+
+    pub(crate) fn new(ctx: Ctx) -> Self {
+        Self { ctx }
     }
 }
