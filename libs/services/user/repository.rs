@@ -112,7 +112,7 @@ impl Repository<UserModel, ListUserArgs> for UserRepository {
     ) -> Result<Vec<UserModel>, sqlx::Error> {
         Ok(vec![
             UserModel::new("dazed".to_string(), "dazed".to_string()),
-            UserModel::new("jimbo".to_string(), "budda".to_string()),
+            UserModel::new("jimbo".to_string(), "jimbo".to_string()),
             UserModel::new("africkuh".to_string(), "africkUh".to_string()),
         ])
     }

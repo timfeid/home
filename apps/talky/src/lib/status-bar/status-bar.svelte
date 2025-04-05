@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
+	import { withPresence } from '$lib/presence.svelte';
 	import { Mic, MicOff, Volume2, VolumeX } from 'lucide-svelte';
 
 	let muted = $state(false);
@@ -12,19 +13,14 @@
 		<span class="text-green-700">Connected</span>
 	</div>
 	<div class="mx-2 text-neutral-500">|</div>
-	<div>
+	<!-- <div>
 		<span class="mr-1 font-bold">Lag:</span>
 		<span>54ms</span>
 	</div>
-	<div class="mx-2 text-neutral-500">|</div>
+	<div class="mx-2 text-neutral-500">|</div>-->
 	<div>
 		<span class="mr-1 font-bold">Users:</span>
-		<span>5</span>
-	</div>
-	<div class="mx-2 text-neutral-500">|</div>
-	<div>
-		<span class="mr-1 font-bold">Channels:</span>
-		<span>6</span>
+		<span>{withPresence().activeClients.length}</span>
 	</div>
 
 	<div class="ml-auto flex items-center">
