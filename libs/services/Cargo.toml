@@ -1,0 +1,17 @@
+[package]
+name = "talky-services"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = "0.1.88"
+serde = { workspace = true }
+specta = { workspace = true, features = ["derive"] }
+sqlx = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+talky-data = { path = "../data" }
+base64 = "0.22.1"
+serde_json.workspace = true
+
+[lib]
+path = "lib.rs"

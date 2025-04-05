@@ -1,6 +1,7 @@
 use std::{marker::PhantomData, path::PathBuf, sync::Arc};
 
 use authentication::create_authentication_router;
+use channel::create_channel_router;
 use rspc::{Procedure, ProcedureBuilder, ResolverInput, ResolverOutput};
 
 use crate::error::AppError;
@@ -20,6 +21,7 @@ use specta::Type;
 // use validator::Validate;
 
 mod authentication;
+mod channel;
 
 impl rspc::Error for AppError {
     fn into_procedure_error(self) -> rspc::ProcedureError {
@@ -54,7 +56,9 @@ impl Serialize for SerialisationError {
 }
 
 pub fn mount() -> Router<Ctx> {
-    Router::new().merge(create_authentication_router())
+    Router::new()
+        .merge(create_authentication_router())
+        .merge(create_channel_router())
 }
 
 pub fn timing_middleware<TError, TCtx, TInput, TResult>(

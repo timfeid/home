@@ -39,4 +39,8 @@ impl Ctx {
         // Err(AppError::Unauthorized)
         Ok(self.user.as_ref().unwrap())
     }
+
+    pub(crate) fn pool_clone(&self) -> Arc<Pool<Postgres>> {
+        self.pool.clone()
+    }
 }

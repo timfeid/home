@@ -10,7 +10,7 @@
 </script>
 
 <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-	<div class="w-full max-w-md border-2 border-gray-400 bg-gray-200">
+	<div class="w-full max-w-md border-2 bg-gray-200">
 		<div class="flex items-center justify-between bg-blue-800 p-1 text-white">
 			<h2 class="text-sm font-bold">Server Settings</h2>
 			<button onclick={onClose} class="text-white">
@@ -21,43 +21,27 @@
 		<div class="space-y-4 p-4">
 			<div class="space-y-1">
 				<label class="block text-sm font-bold">Server Address:</label>
-				<input
-					type="text"
-					bind:value={serverName}
-					class="w-full border border-gray-400 p-1 text-sm"
-				/>
+				<input type="text" bind:value={serverName} class="w-full border p-1 text-sm" />
 			</div>
 
 			<div class="space-y-1">
 				<label class="block text-sm font-bold">Port:</label>
-				<input type="text" value="6667" class="w-full border border-gray-400 p-1 text-sm" />
+				<input type="text" value="6667" class="w-full border p-1 text-sm" />
 			</div>
 
 			<div class="space-y-1">
 				<label class="block text-sm font-bold">Nickname:</label>
-				<input
-					type="text"
-					bind:value={nickname}
-					class="w-full border border-gray-400 p-1 text-sm"
-				/>
+				<input type="text" bind:value={nickname} class="w-full border p-1 text-sm" />
 			</div>
 
 			<div class="space-y-1">
 				<label class="block text-sm font-bold">Alternative Nickname:</label>
-				<input
-					type="text"
-					bind:value={alternateNick}
-					class="w-full border border-gray-400 p-1 text-sm"
-				/>
+				<input type="text" bind:value={alternateNick} class="w-full border p-1 text-sm" />
 			</div>
 
 			<div class="space-y-1">
 				<label class="block text-sm font-bold">Auto-join channels:</label>
-				<input
-					type="text"
-					bind:value={autoJoinChannels}
-					class="w-full border border-gray-400 p-1 text-sm"
-				/>
+				<input type="text" bind:value={autoJoinChannels} class="w-full border p-1 text-sm" />
 				<p class="text-xs text-gray-600">Separate multiple channels with commas</p>
 			</div>
 
@@ -78,10 +62,8 @@
 			</div>
 		</div>
 
-		<div class="flex justify-end gap-2 border-t border-gray-400 bg-gray-300 p-2">
-			<button onclick={onClose} class="border border-gray-400 bg-gray-100 px-3 py-1 text-sm">
-				Cancel
-			</button>
+		<div class="flex justify-end gap-2 border-t bg-gray-300 p-2">
+			<button onclick={onClose} class="border bg-gray-100 px-3 py-1 text-sm"> Cancel </button>
 			<button class="bg-blue-600 px-3 py-1 text-sm text-white">Save</button>
 		</div>
 	</div>

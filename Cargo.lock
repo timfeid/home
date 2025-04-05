@@ -4827,6 +4827,7 @@ dependencies = [
  "sqlx",
  "talky-auth",
  "talky-data",
+ "talky-services",
  "textwrap",
  "thiserror 2.0.12",
  "tokio",
@@ -5779,6 +5780,20 @@ dependencies = [
  "bcrypt",
  "sqlx",
  "uuid",
+]
+
+[[package]]
+name = "talky-services"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "specta",
+ "sqlx",
+ "talky-data",
+ "tokio",
 ]
 
 [[package]]

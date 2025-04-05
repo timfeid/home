@@ -4,7 +4,7 @@
 
 <div class="flex items-center text-sm">
 	<span class="mr-2 font-bold">Server:</span>
-	<button class="flex items-center border border-gray-400 bg-white px-2 py-0.5">
+	<button class="flex items-center border bg-white px-2 py-0.5">
 		irc.gaming.net
 		<ChevronDown class="ml-1 h-4 w-4" />
 	</button>

@@ -1,4 +1,5 @@
-import { UserDetails } from './user.svelte.js';
+import { setContext } from 'svelte';
+import { user, UserDetails } from './user.svelte.js';
 
 interface ClientInfoMsg {
 	id: string;
@@ -23,8 +24,6 @@ const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 3000;
 
 export class Presence {
-	private user: UserDetails;
-
 	socket = $state<WebSocket | null>(null);
 
 	status = $state<'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed' | 'error'>('idle');
@@ -39,26 +38,24 @@ export class Presence {
 	isConnected = $derived(this.status === 'open');
 	isTrying = $derived(this.status === 'connecting' || this.status === 'reconnecting');
 
-	constructor(userDetails: UserDetails) {
-		this.user = userDetails;
-
+	setup() {
 		$effect(() => {
-			const token = this.user.accessToken;
+			const token = user.accessToken;
 
 			console.debug(
-				`[Presence Effect Run] Token: ${token ? 'present' : 'absent'}, Status: ${this.status}, ExplicitlyClosed: ${this.explicitlyClosed}`,
+				`[Presence Effect Run] Token: ${token ? 'present' : 'absent'}, Status: ${this.status}, ExplicitlyClosed: ${this.explicitlyClosed}`
 			);
 
 			if (token && this.status === 'idle') {
 				console.log(
-					'[Presence Effect] Token appeared and status is idle. Initiating connection process.',
+					'[Presence Effect] Token appeared and status is idle. Initiating connection process.'
 				);
 				this.explicitlyClosed = false;
 				this.retryCount = 0;
 				this.attemptConnection(token);
 			} else if (!token && this.status !== 'idle') {
 				console.log(
-					'[Presence Effect] Token disappeared. Disconnecting and setting status to idle.',
+					'[Presence Effect] Token disappeared. Disconnecting and setting status to idle.'
 				);
 				this.disconnect(true);
 				this.status = 'idle';
@@ -75,7 +72,7 @@ export class Presence {
 
 		if (this.socket || this.status === 'open' || this.status === 'connecting') {
 			console.warn(
-				`[AttemptConnection] Aborted: Already connected or attempting (Status: ${this.status}).`,
+				`[AttemptConnection] Aborted: Already connected or attempting (Status: ${this.status}).`
 			);
 			return;
 		}
@@ -88,7 +85,7 @@ export class Presence {
 
 		if (this.retryCount >= MAX_RETRIES) {
 			console.error(
-				`[AttemptConnection] Aborted: Max retries (${MAX_RETRIES}) were previously reached.`,
+				`[AttemptConnection] Aborted: Max retries (${MAX_RETRIES}) were previously reached.`
 			);
 			if (this.status !== 'error') this.status = 'error';
 			this.error = this.error || new Error(`Max retries (${MAX_RETRIES}) reached.`);
@@ -97,7 +94,7 @@ export class Presence {
 
 		const isInitialAttempt = this.retryCount === 0;
 		console.log(
-			`[AttemptConnection] Attempting WebSocket connection (Attempt: ${this.retryCount + 1}/${MAX_RETRIES})...`,
+			`[AttemptConnection] Attempting WebSocket connection (Attempt: ${this.retryCount + 1}/${MAX_RETRIES})...`
 		);
 		this.status = isInitialAttempt ? 'connecting' : 'reconnecting';
 		this.error = null;
@@ -133,7 +130,7 @@ export class Presence {
 		const initMsg = {
 			type: 'init',
 			auth_code: token,
-			role: 'presence',
+			role: 'presence'
 		};
 		try {
 			console.log('[Presence] Sending init message:', initMsg);
@@ -187,13 +184,13 @@ export class Presence {
 		}
 
 		console.log(
-			`[Presence] WebSocket connection closed. Code: ${event.code}, Reason: "${event.reason}", Clean: ${event.wasClean}, ExplicitlyClosed: ${this.explicitlyClosed}`,
+			`[Presence] WebSocket connection closed. Code: ${event.code}, Reason: "${event.reason}", Clean: ${event.wasClean}, ExplicitlyClosed: ${this.explicitlyClosed}`
 		);
 		this.socket = null;
 		this.clearRetryTimer();
 
 		const shouldAttemptRetry =
-			this.user.accessToken &&
+			user.accessToken &&
 			!this.explicitlyClosed &&
 			this.retryCount < MAX_RETRIES &&
 			event.code !== 1000;
@@ -201,35 +198,35 @@ export class Presence {
 		if (shouldAttemptRetry) {
 			this.retryCount++;
 			console.log(
-				`[Presence] Connection closed unexpectedly. Scheduling retry ${this.retryCount}/${MAX_RETRIES} in ${RETRY_DELAY_MS}ms...`,
+				`[Presence] Connection closed unexpectedly. Scheduling retry ${this.retryCount}/${MAX_RETRIES} in ${RETRY_DELAY_MS}ms...`
 			);
 			this.status = 'reconnecting';
 			this.retryTimer = setTimeout(() => {
 				this.retryTimer = null;
 
-				if (this.user.accessToken && !this.explicitlyClosed) {
-					this.attemptConnection(this.user.accessToken);
+				if (user.accessToken && !this.explicitlyClosed) {
+					this.attemptConnection(user.accessToken);
 				} else {
 					console.log(
-						'[Presence] Retry aborted inside timeout: Token missing or explicitly closed during delay.',
+						'[Presence] Retry aborted inside timeout: Token missing or explicitly closed during delay.'
 					);
-					this.status = this.user.accessToken ? 'closed' : 'idle';
-					if (!this.user.accessToken) this.retryCount = 0;
+					this.status = user.accessToken ? 'closed' : 'idle';
+					if (!user.accessToken) this.retryCount = 0;
 				}
 			}, RETRY_DELAY_MS);
 		} else {
 			console.log('[Presence] No retry condition met upon close.');
-			if (this.retryCount >= MAX_RETRIES && !this.explicitlyClosed && this.user.accessToken) {
+			if (this.retryCount >= MAX_RETRIES && !this.explicitlyClosed && user.accessToken) {
 				console.error(`[Presence] Max retries (${MAX_RETRIES}) reached. Setting status to error.`);
 				this.status = 'error';
 				this.error = this.error || new Error(`Connection failed after ${MAX_RETRIES} retries.`);
-			} else if (!this.user.accessToken) {
+			} else if (!user.accessToken) {
 				console.log('[Presence] User logged out. Setting status to idle.');
 				this.status = 'idle';
 				this.retryCount = 0;
 			} else {
 				console.log(
-					`[Presence] Setting status to closed (Explicit: ${this.explicitlyClosed}, Code: ${event.code}).`,
+					`[Presence] Setting status to closed (Explicit: ${this.explicitlyClosed}, Code: ${event.code}).`
 				);
 				this.status = 'closed';
 
@@ -274,7 +271,7 @@ export class Presence {
 			this.socket = null;
 		}
 
-		if (!this.user.accessToken) {
+		if (!user.accessToken) {
 			this.status = 'idle';
 			this.retryCount = 0;
 		} else if (!this.socket) {
@@ -313,7 +310,7 @@ export class Presence {
 	sendMessage(message: object): boolean {
 		if (!this.socket || this.status !== 'open') {
 			console.error(
-				`[Presence SendMessage] Cannot send message, WebSocket status is not 'open' (Status: ${this.status}).`,
+				`[Presence SendMessage] Cannot send message, WebSocket status is not 'open' (Status: ${this.status}).`
 			);
 			return false;
 		}
@@ -331,8 +328,4 @@ export class Presence {
 			return false;
 		}
 	}
-}
-
-export function setupPresence(user: UserDetails) {
-	return new Presence(user);
 }

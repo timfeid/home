@@ -12,20 +12,17 @@ path = "src/bins/server.rs"
 [dependencies]
 talky-data = { path = "../../libs/data" }
 talky-auth = { path = "../../libs/auth" }
+talky-services = { path = "../../libs/services" }
 dotenv = "0.15.0"
 rspc = { version = "0.4.1", features = ["typescript", "rust"] }
 rspc-axum = { version = "0.3.0", features = ["ws"] }
 axum = { version = "0.7.9", features = ["multipart"] }
 
 serde = { workspace = true }
-specta = { version = "=2.0.0-rc.22", default-features = false }
+specta = { workspace = true }
 
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
-sqlx = { version = "0.8.1", features = [
-  "postgres",
-  "runtime-tokio-rustls",
-  "time",
-] }
+sqlx = { workspace = true }
 tower-http = { version = "0.6.2", features = ["cors"] }
 jsonwebtoken = "9.3.0"
 bcrypt = "0.17.0"

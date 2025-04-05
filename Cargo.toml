@@ -1,13 +1,13 @@
 [workspace]
 members = [
-  "apps/media",
-  "apps/talky-api",
-  "apps/talky/src-tauri",
-  "apps/talky-test",
-  "apps/talky-soundhouse",
-  "libs/auth",
-  "libs/data",
-
+    "apps/media",
+    "apps/talky-api",
+    "apps/talky/src-tauri",
+    "apps/talky-test",
+    "apps/talky-soundhouse",
+    "libs/auth",
+    "libs/data",
+    "libs/services",
 ]
 resolver = "2"
 default-members = ["apps/media", "apps/talky-api"]
@@ -17,7 +17,14 @@ anyhow = "1.0.97"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 tokio = { version = "1.44.1", features = [
-  "rt-multi-thread",
-  "macros",
-  "signal",
+    "rt-multi-thread",
+    "macros",
+    "signal",
+] }
+specta = { version = "=2.0.0-rc.22", default-features = false }
+rspc = { version = "0.4.1", features = ["typescript", "rust"] }
+sqlx = { version = "0.8.1", features = [
+    "postgres",
+    "runtime-tokio-rustls",
+    "time",
 ] }
