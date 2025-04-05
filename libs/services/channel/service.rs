@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -7,7 +8,6 @@ use crate::{
     pagination::{
         connection_from_repository, Cursor, ListResult, Model, Node, PaginationArgs, WithPagination,
     },
-    repository::Repository,
     DatabasePool,
 };
 
@@ -88,8 +88,6 @@ impl ChannelService {
 }
 
 mod tests {
-    use std::sync::Arc;
-
     use talky_data::database::create_connection;
 
     use crate::{

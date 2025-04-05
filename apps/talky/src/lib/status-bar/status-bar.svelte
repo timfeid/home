@@ -6,7 +6,7 @@
 	let deafened = $state(false);
 </script>
 
-<div class="flex items-center border-t p-1 text-xs">
+<div class="flex items-center border-t px-3 py-1 text-[10px]">
 	<div class="flex items-center">
 		<span class="mr-1 font-bold">Status:</span>
 		<span class="text-green-700">Connected</span>
@@ -32,26 +32,26 @@
 			size="icon"
 			variant="secondary"
 			onclick={() => (muted = !muted)}
-			class="mr-1 h-5 w-5 {muted ? 'text-red-700' : ''}"
+			class="mr-1 h-4 w-4 bg-transparent p-3 {muted ? 'text-red-700' : ''}"
 			title={muted ? 'Unmute' : 'Mute'}
 		>
 			{#if muted}
-				<MicOff class="h-3 w-3" />
+				<MicOff class="size-3" />
 			{:else}
-				<Mic class="h-3 w-3" />
+				<Mic class="size-3" />
 			{/if}
 		</Button>
 		<Button
 			size="icon"
 			variant="secondary"
 			onclick={() => (deafened = !deafened)}
-			class="h-5 w-5 {deafened ? 'text-red-700' : ''}"
+			class="mr-1 h-4 w-4 bg-transparent p-3 {deafened ? 'text-red-700' : ''}"
 			title={deafened ? 'Undeafen' : 'Deafen'}
 		>
 			{#if deafened}
-				<VolumeX class="h-2 w-2" />
+				<VolumeX class="size-3" />
 			{:else}
-				<Volume2 class="h-2 w-2" />
+				<Volume2 class="size-3" />
 			{/if}
 		</Button>
 	</div>

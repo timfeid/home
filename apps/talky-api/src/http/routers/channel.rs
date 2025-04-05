@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use rspc::Router;
+use talky_services::message::service::ListMessageArgs;
 
 use crate::http::{
     context::Ctx,
@@ -21,6 +22,10 @@ pub fn create_channel_router() -> Router<Ctx> {
         .procedure("channel_list_users", {
             <BaseProcedure>::builder()
                 .query(|ctx, id: String| ChannelController::new(ctx).list_users(id))
+        })
+        .procedure("channel_messages", {
+            <BaseProcedure>::builder()
+                .query(|ctx, args: ListMessageArgs| ChannelController::new(ctx).list_messages(args))
         })
         .procedure("channel_list_in", {
             <BaseProcedure>::builder()

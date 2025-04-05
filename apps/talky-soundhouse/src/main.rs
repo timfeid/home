@@ -23,7 +23,7 @@ async fn main() -> AppResult<()> {
     tracing::info!("Configuration loaded successfully.");
     tracing::debug!("Server Address: {}", config.server_addr);
 
-    let app_state = AppState::new();
+    let app_state = AppState::new(&config.database_url).await;
     tracing::info!("Application state initialized.");
 
     let routes = build_routes(app_state.clone());

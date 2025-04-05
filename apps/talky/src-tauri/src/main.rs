@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let webrtc_manager = WebRTCManager::new(
         default_config,
         "ws://localhost:8080/soundhouse",
-        "room1".to_string(),
+        "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0aW0iLCJqdGkiOiJjNWJhZDUxMC1kY2JjLTQ2MGQtYmY2Ny00YmY0Y2VlMGFiZmEiLCJleHAiOjE3NDQ0OTIwMDZ9.PXJdLwMo8q4dHTgBYCFOSYF1AVy7HaZ2s8a-3jH77Bcktq1tha_yTxBpDZ_gOoHZeg9sDV9AlFkpimM6XBmDh0Z9sl-wbBkWosmk-TruwWp84vazHAopFdG5X4hXAocCRV8t4a_QDqzwdTbOjMF-1-p_LG2F2Ihod7T_Jl9Yvf3LwzaFOadpw5Zer-XtZTmrvYv4FD0zSFzM8eBrt5NA4jgdfhU5bMQE4vwCrySHZ5nnnl8Pv_yKLAUV8E6egRy9lVH2iegF4bxlYOMQFiBQmiGBkelJ0GvBtnr3jisOn0ANOOaWphuYciIbrjkCGoer6kPzRx7TR8KjPQVK92_N-A".to_string(),
     )
     .await
     .expect("Failed to initialize WebRTC");

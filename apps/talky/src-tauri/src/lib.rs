@@ -5,10 +5,12 @@ use cpal::{BufferSize, SampleRate, StreamConfig, SupportedStreamConfig};
 use futures_util::{SinkExt, StreamExt};
 use opus::{Application, Channels, Encoder};
 use serde::{Deserialize, Serialize};
+
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tauri::Manager;
+use tauri::{AppHandle, Manager};
+use tauri_plugin_store::{StoreBuilder, StoreExt};
 use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tungstenite::Bytes;
@@ -335,8 +337,8 @@ impl WebRTCManager {
         let ws_sender = Arc::new(Mutex::new(ws_sender));
 
         let init_msg = json!({
-            "join_code": join_code.clone(),
-            "role": "offerer"
+            "type": "init",
+            "auth_code": join_code.clone(),
         })
         .to_string();
         ws_sender
@@ -576,6 +578,31 @@ impl WebRTCManager {
 }
 
 #[tauri::command]
+async fn set_refresh_token(app: AppHandle, token: String) -> Result<(), tauri_plugin_store::Error> {
+    // Define the path for the store (adjust as needed)
+    let path = app
+        .path()
+        .app_data_dir()
+        .expect("unable to find data dir")
+        .join("data.json");
+
+    let store = app.store(path)?;
+    store.set("refresh_token".to_string(), json!(token));
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_refresh_token(app: AppHandle) -> Result<Option<Value>, tauri_plugin_store::Error> {
+    let path = app
+        .path()
+        .app_data_dir()
+        .expect("unable to find data dir")
+        .join("data.json");
+
+    app.store(path).and_then(|s| Ok(s.get("refresh_token")))
+}
+
+#[tauri::command]
 async fn configure_audio_capture(
     config: AudioCaptureConfig,
     state: tauri::State<'_, WebRTCManager>,
@@ -599,13 +626,16 @@ async fn toggle_push_to_talk(
 
 pub fn run(manager: WebRTCManager) {
     tauri::Builder::default()
+        .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             app.handle().manage(manager);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             configure_audio_capture,
-            toggle_push_to_talk
+            toggle_push_to_talk,
+            get_refresh_token,
+            set_refresh_token
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

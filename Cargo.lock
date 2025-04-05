@@ -225,6 +225,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-log",
+ "tauri-plugin-store",
  "tokio",
  "tokio-tungstenite 0.26.2",
  "tokio-util",
@@ -5788,12 +5789,14 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
+ "chrono",
  "serde",
  "serde_json",
  "specta",
  "sqlx",
  "talky-data",
  "tokio",
+ "ulid",
 ]
 
 [[package]]
@@ -5808,6 +5811,8 @@ dependencies = [
  "serde",
  "serde_json",
  "talky-auth",
+ "talky-data",
+ "talky-services",
  "thiserror 2.0.12",
  "tokio",
  "tokio-tungstenite 0.26.2",
@@ -6049,6 +6054,22 @@ dependencies = [
  "tauri-plugin",
  "thiserror 2.0.12",
  "time",
+]
+
+[[package]]
+name = "tauri-plugin-store"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c0c08fae6995909f5e9a0da6038273b750221319f2c0f3b526d6de1cde21505"
+dependencies = [
+ "dunce",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.12",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

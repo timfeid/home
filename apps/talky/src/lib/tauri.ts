@@ -6,7 +6,8 @@ import { browser } from '$app/environment';
 export const isTauri = browser && forTauri();
 
 export async function getRefreshTokenFromTauri() {
-	return (await invoke('get_refresh_token')) as string | null;
+	const response = (await invoke('get_refresh_token')) as string | null;
+	return response;
 }
 
 export async function saveRefreshTokenTauri(token: string) {
@@ -19,7 +20,7 @@ export async function getAccessTokenWithTauri() {
 	try {
 		const refreshToken = await getRefreshTokenFromTauri();
 		if (refreshToken) {
-			return wrapResponse(await client.auth_refresh_token.query(refreshToken));
+			return wrapResponse(await client.auth_refresh_token.query(refreshToken)).access_token;
 		}
 	} catch (e) {
 		console.error(e);

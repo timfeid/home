@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use talky_services::message::service::MessageResource;
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -26,8 +27,7 @@ pub enum OutgoingMessage {
 
     ChatMessageBroadcast {
         sender_id: String,
-        content: String,
-        user_id: String,
+        message: MessageResource,
         channel_id: String,
     },
 

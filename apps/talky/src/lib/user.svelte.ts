@@ -41,7 +41,10 @@ export class UserDetails {
 	}
 
 	public async setup() {
-		await this.getFreshAccessToken();
+		const token = await this.getFreshAccessToken();
+		if (token) {
+			this.accessToken = token;
+		}
 	}
 
 	private async getFreshAccessToken() {
@@ -51,10 +54,6 @@ export class UserDetails {
 
 		const response = await fetch('/refresh-token', { method: 'post' });
 		const token = ((await response.text()) || '').trim();
-
-		if (token) {
-			this.accessToken = token;
-		}
 
 		return token;
 	}

@@ -1,5 +1,6 @@
 import { getContext } from 'svelte';
 import { user } from './user.svelte.js';
+import type { Procedures } from '@feid/bindings';
 
 interface ClientInfoMsg {
 	id: string;
@@ -18,11 +19,8 @@ interface ErrorMessage {
 
 export interface ChatMessage {
 	type: 'chat_message_broadcast';
-	message: string;
-	content: string;
+	message: Procedures['channel_messages']['output']['edges'][number]['node'];
 	channel_id: string;
-	user_id: string;
-	timestamp: string;
 }
 
 export type IncomingServerMessage = ActiveClientsMessage | ErrorMessage | ChatMessage;
@@ -346,7 +344,7 @@ export class Presence extends EventEmitter {
 		this.retryCount = 0;
 	}
 
-	async sendMessage(message: object): Promise<boolean> {
+	sendMessage(message: object): boolean {
 		if (!this.socket || this.status !== 'open') {
 			console.error(
 				`[Presence SendMessage] Cannot send message, WebSocket status is not 'open' (Status: ${this.status}).`
@@ -355,7 +353,7 @@ export class Presence extends EventEmitter {
 		}
 		try {
 			const jsonMessage = JSON.stringify(message);
-			await this.socket.send(jsonMessage);
+			this.socket.send(jsonMessage);
 			console.debug('[Presence SendMessage] Sent message:', message);
 			this.emit('messageSent', message);
 			return true;

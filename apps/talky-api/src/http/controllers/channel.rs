@@ -2,6 +2,7 @@ use bcrypt::verify;
 use sqlx::{Pool, Postgres};
 use talky_services::{
     channel::service::{ChannelResource, ChannelService, ListChannelArgs, ListChannelMeta},
+    message::service::{ListMessageArgs, ListMessageMeta, MessageResource, MessageService},
     pagination::ListResult,
     user::service::{ListUserArgs, ListUserMeta, UserResource, UserService},
 };
@@ -21,6 +22,7 @@ pub struct ChannelController {
     ctx: Ctx,
     channel_service: ChannelService,
     user_service: UserService,
+    message_service: MessageService,
 }
 
 impl ChannelController {
@@ -28,6 +30,19 @@ impl ChannelController {
         let response = self
             .channel_service
             .find_by_slug(slug)
+            .await
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+        Ok(response)
+    }
+
+    pub async fn list_messages(
+        self,
+        args: ListMessageArgs,
+    ) -> AppResult<ListResult<MessageResource, ListMessageMeta>> {
+        let response = self
+            .message_service
+            .list(args)
             .await
             .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 
@@ -70,11 +85,13 @@ impl ChannelController {
     pub(crate) fn new(ctx: Ctx) -> Self {
         let channel_service = ChannelService::new(ctx.pool_clone());
         let user_service = UserService::new(ctx.pool_clone());
+        let message_service = MessageService::new(ctx.pool_clone());
 
         Self {
             ctx,
             channel_service,
             user_service,
+            message_service,
         }
     }
 }

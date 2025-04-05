@@ -3,6 +3,10 @@ use crate::message::{ClientInfoMsg, OutgoingMessage};
 use futures::{stream::SplitSink, SinkExt};
 use std::collections::HashMap;
 use std::sync::Arc;
+use talky_data::database::create_connection;
+use talky_services::channel::service::ChannelService;
+use talky_services::message::service::{AddChatMessageArgs, MessageResource, MessageService};
+use talky_services::DatabasePool;
 use tokio::sync::{Mutex, MutexGuard};
 use warp::ws::{Message, WebSocket};
 
@@ -34,13 +38,15 @@ impl ClientInfo {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub clients: Arc<Mutex<HashMap<String, ClientInfo>>>,
+    clients: Arc<Mutex<HashMap<String, ClientInfo>>>,
+    connection: DatabasePool,
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub async fn new(database_url: &String) -> Self {
         AppState {
             clients: Arc::new(Mutex::new(HashMap::new())),
+            connection: create_connection(database_url).await,
         }
     }
 
@@ -113,15 +119,24 @@ impl AppState {
                 .get(sender_id)
                 .and_then(|s| Some(s.user_id.clone()))
         };
+
         if let Some(user_id) = user_id {
-            let message = OutgoingMessage::ChatMessageBroadcast {
+            let message_service = MessageService::new(self.connection.clone());
+            let message = message_service
+                .add_chat_message(AddChatMessageArgs {
+                    user_id,
+                    channel_id: channel_id.clone(),
+                    contents: content,
+                })
+                .await;
+
+            let broadcast_message = OutgoingMessage::ChatMessageBroadcast {
                 sender_id: (*sender_id).to_string(),
-                user_id,
-                channel_id,
-                content,
+                channel_id: channel_id.clone(),
+                message,
             };
 
-            self.broadcast_all(&message).await;
+            self.broadcast_all(&broadcast_message).await;
         }
         Ok(())
     }
