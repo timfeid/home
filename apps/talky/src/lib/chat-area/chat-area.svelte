@@ -2,9 +2,11 @@
 	import { Avatar, AvatarFallback, AvatarImage } from '$lib/components/ui/avatar';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Separator } from '$lib/components/ui/separator';
 	import UserList from '$lib/user-list/user-list.svelte';
+	import type { Procedures } from '@feid/bindings';
 	import { Send, Paperclip, AtSign, Smile } from 'lucide-svelte';
+
+	let { channel }: { channel: Procedures['niche_find_by_slug']['output']; slug: string } = $props();
 
 	type Message = {
 		id: string;
@@ -162,6 +164,6 @@
 		</div>
 	</div>
 	<div>
-		<UserList />
+		<UserList {channel} />
 	</div>
 </div>

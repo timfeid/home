@@ -10,18 +10,18 @@ use crate::{
     DatabasePool,
 };
 
-use super::service::{ChannelResource, ListChannelArgs};
+use super::service::{ListNicheArgs, NicheResource};
 
-pub(crate) struct ChannelRepository {
+pub(crate) struct NicheRepository {
     connection: DatabasePool,
 }
 
-pub(crate) struct ChannelModel {
+pub(crate) struct NicheModel {
     pub(super) id: String,
     pub(super) name: String,
     pub(super) slug: String,
 }
-impl ChannelModel {
+impl NicheModel {
     pub fn new(name: String) -> Self {
         Self {
             id: name.to_lowercase(),
@@ -31,26 +31,26 @@ impl ChannelModel {
     }
 }
 
-impl Model<ChannelResource> for ChannelModel {
+impl Model<NicheResource> for NicheModel {
     fn id(&self) -> String {
-        self.slug.clone()
+        self.id.clone()
     }
 
-    fn to_node(&self) -> ChannelResource {
-        ChannelResource {
-            name: self.name.clone(),
+    fn to_node(&self) -> NicheResource {
+        NicheResource {
             id: self.id.clone(),
+            name: self.name.clone(),
             slug: self.slug.clone(),
         }
     }
 }
 
-impl ChannelRepository {
+impl NicheRepository {
     pub fn new(connection: DatabasePool) -> Self {
         Self { connection }
     }
 
-    pub fn find_by_slug(&self, slug: String) -> Result<ChannelModel, sqlx::Error> {
+    pub fn find_one(&self, slug: String) -> Result<NicheModel, sqlx::Error> {
         let name = slug
             .chars()
             .enumerate()
@@ -62,24 +62,25 @@ impl ChannelRepository {
                 }
             })
             .collect::<String>();
-        Ok(ChannelModel::new(name))
+
+        Ok(NicheModel::new(name))
     }
 }
 
 #[derive(Type, Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-pub struct ChannelCursor {
+pub struct NicheCursor {
     pub id: String,
 }
 
-impl Cursor for ChannelCursor {
-    type CursorType = ChannelCursor;
+impl Cursor for NicheCursor {
+    type CursorType = NicheCursor;
 
-    fn encode(cursor: &ChannelCursor) -> String {
+    fn encode(cursor: &NicheCursor) -> String {
         let cursor_str = cursor.to_string();
         general_purpose::STANDARD.encode(cursor_str)
     }
 
-    fn decode(encoded: &str) -> Option<ChannelCursor> {
+    fn decode(encoded: &str) -> Option<NicheCursor> {
         let decoded_bytes = general_purpose::STANDARD.decode(encoded).ok()?;
         let decoded_str = String::from_utf8(decoded_bytes).ok()?;
         serde_json::from_str(&decoded_str).ok()
@@ -94,7 +95,7 @@ impl Cursor for ChannelCursor {
     }
 }
 
-impl Display for ChannelCursor {
+impl Display for NicheCursor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Serialize the FollowCursor to JSON and write it as a string
         match serde_json::to_string(self) {
@@ -104,8 +105,8 @@ impl Display for ChannelCursor {
     }
 }
 
-impl Repository<ChannelModel, ListChannelArgs> for ChannelRepository {
-    async fn count(&self, args: &ListChannelArgs) -> Result<i32, sqlx::Error> {
+impl Repository<NicheModel, ListNicheArgs> for NicheRepository {
+    async fn count(&self, args: &ListNicheArgs) -> Result<i32, sqlx::Error> {
         Ok(2)
     }
 
@@ -116,11 +117,8 @@ impl Repository<ChannelModel, ListChannelArgs> for ChannelRepository {
             impl crate::pagination::Cursor + Send,
         )>,
         take: i32,
-        args: &ListChannelArgs,
-    ) -> Result<Vec<ChannelModel>, sqlx::Error> {
-        Ok(vec![
-            ChannelModel::new("News".to_string()),
-            ChannelModel::new("Gameday".to_string()),
-        ])
+        args: &ListNicheArgs,
+    ) -> Result<Vec<NicheModel>, sqlx::Error> {
+        Ok(vec![NicheModel::new("Devils".to_string())])
     }
 }

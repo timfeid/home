@@ -1,14 +1,23 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import ChatArea from '$lib/chat-area/chat-area.svelte';
+	import Channel from '$lib/components/channel/channel.svelte';
+	import Niche from '$lib/components/niche/niche.svelte';
+	import ChannelsSidebar from '$lib/layout/channels-sidebar.svelte';
 	import Layout from '$lib/layout/layout.svelte';
-	import NewsList from '$lib/news-list/news-list.svelte';
 </script>
 
 <Layout>
-	{#if page.params.channel === 'news'}
-		<NewsList />
-	{:else}
-		<ChatArea />
-	{/if}
+	<ChannelsSidebar />
+
+	<div class="flex flex-1 flex-col">
+		{#key page.params.niche}
+			<Niche slug={page.params.niche}>
+				{#snippet withNiche({ niche })}
+					{#key page.params.channel}
+						<Channel {niche} slug={page.params.channel} />
+					{/key}
+				{/snippet}
+			</Niche>
+		{/key}
+	</div>
 </Layout>

@@ -20,7 +20,6 @@ pub enum IncomingMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutgoingMessage {
     ActiveClientsUpdate {
-        join_code: String,
         clients: Vec<ClientInfoMsg>,
     },
 
@@ -41,8 +40,7 @@ pub enum OutgoingMessage {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ClientInfoMsg {
-    pub id: String,
-    pub role: String,
+    pub user_id: String,
 }
 
 impl OutgoingMessage {

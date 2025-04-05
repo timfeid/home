@@ -2,6 +2,7 @@ use std::{marker::PhantomData, path::PathBuf, sync::Arc};
 
 use authentication::create_authentication_router;
 use channel::create_channel_router;
+use niche::create_niche_router;
 use rspc::{Procedure, ProcedureBuilder, ResolverInput, ResolverOutput};
 
 use crate::error::AppError;
@@ -9,19 +10,14 @@ use crate::error::AppError;
 use super::context::Ctx;
 
 use std::time::{Instant, SystemTime};
-use thiserror::Error;
 
 use rspc::{middleware::Middleware, Router};
-// use rspc_cache::{cache, cache_ttl, CacheState, Memory};
-// use rspc_invalidation::Invalidate;
-// use rspc_zer::Zer;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-// use thiserror::Error;
-// use validator::Validate;
 
 mod authentication;
 mod channel;
+mod niche;
 
 impl rspc::Error for AppError {
     fn into_procedure_error(self) -> rspc::ProcedureError {
@@ -59,6 +55,7 @@ pub fn mount() -> Router<Ctx> {
     Router::new()
         .merge(create_authentication_router())
         .merge(create_channel_router())
+        .merge(create_niche_router())
 }
 
 pub fn timing_middleware<TError, TCtx, TInput, TResult>(

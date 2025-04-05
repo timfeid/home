@@ -18,11 +18,15 @@ pub struct ClientInfo {
 
 impl ClientInfo {
     pub async fn send(&self, message: &OutgoingMessage) -> AppResult<()> {
-        self.sender.lock().await.send(
-            message
-                .to_ws_message()
-                .map_err(|e| AppError::Anyhow(anyhow::Error::msg(e)))?,
-        );
+        self.sender
+            .lock()
+            .await
+            .send(
+                message
+                    .to_ws_message()
+                    .map_err(|e| AppError::Anyhow(anyhow::Error::msg(e)))?,
+            )
+            .await?;
 
         Ok(())
     }
@@ -46,8 +50,7 @@ impl Room {
         self.clients
             .values()
             .map(|c| ClientInfoMsg {
-                id: c.id.to_string(),
-                role: c.role.clone(),
+                user_id: c.user_id.to_string(),
             })
             .collect()
     }
@@ -148,12 +151,14 @@ impl AppState {
             .lock()
             .await
             .insert(client_info.id.clone(), client_info.clone());
+        self.broadcast_active_clients().await;
 
         Ok(())
     }
 
     pub async fn remove_client(&self, client_id: &str) {
         self.clients.lock().await.remove(client_id);
+        self.broadcast_active_clients().await;
     }
 
     pub async fn send_to_client(
@@ -222,14 +227,53 @@ impl AppState {
         }
     }
 
-    async fn broadcast_active_clients(&self, join_code: &str, room: &Room) {
-        let client_infos = room.get_client_info_msgs();
+    async fn get_client_info_msgs(&self) -> Vec<ClientInfoMsg> {
+        self.clients
+            .lock()
+            .await
+            .values()
+            .map(|c| ClientInfoMsg {
+                user_id: c.user_id.to_string(),
+            })
+            .collect()
+    }
+
+    async fn broadcast_all(&self, message: &OutgoingMessage) {
+        let ws_message = match message.to_ws_message() {
+            Ok(msg) => msg,
+            Err(e) => {
+                tracing::error!("Failed to serialize broadcast message: {}", e);
+                return;
+            }
+        };
+
+        let clients = { self.clients.lock().await.clone() };
+        for (id, client) in clients.iter() {
+            let mut sender_lock = client.sender.lock().await;
+            if let Err(e) = sender_lock.send(ws_message.clone()).await {
+                tracing::warn!("Failed to send broadcast message to client {}: {}", id, e);
+            }
+        }
+    }
+
+    async fn broadcast_active_clients(&self) {
+        let client_infos = self.get_client_info_msgs().await;
         let update_msg = OutgoingMessage::ActiveClientsUpdate {
-            join_code: join_code.to_string(),
             clients: client_infos,
         };
 
-        room.broadcast_all(&update_msg).await;
-        tracing::debug!("Broadcasted active clients for room '{}'", join_code);
+        self.broadcast_all(&update_msg).await;
+        tracing::debug!("Broadcasted active clients");
     }
+
+    // async fn broadcast_active_clients(&self, join_code: &str, room: &Room) {
+    //     let client_infos = room.get_client_info_msgs();
+    //     let update_msg = OutgoingMessage::ActiveClientsUpdate {
+    //         join_code: join_code.to_string(),
+    //         clients: client_infos,
+    //     };
+
+    //     room.broadcast_all(&update_msg).await;
+    //     tracing::debug!("Broadcasted active clients for room '{}'", join_code);
+    // }
 }

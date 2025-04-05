@@ -10,76 +10,68 @@ use crate::{
     DatabasePool,
 };
 
-use super::service::{ChannelResource, ListChannelArgs};
+use super::service::{ListUserArgs, UserResource};
 
-pub(crate) struct ChannelRepository {
+pub(crate) struct UserRepository {
     connection: DatabasePool,
 }
 
-pub(crate) struct ChannelModel {
+pub(crate) struct UserModel {
     pub(super) id: String,
-    pub(super) name: String,
-    pub(super) slug: String,
+    pub(super) username: String,
+    pub(super) avatar_url: Option<String>,
+    pub(super) email: Option<String>,
+    pub(super) password: Option<String>,
 }
-impl ChannelModel {
-    pub fn new(name: String) -> Self {
+
+impl UserModel {
+    pub fn new(id: String, username: String) -> Self {
         Self {
-            id: name.to_lowercase(),
-            slug: name.to_lowercase(),
-            name,
+            id,
+            username,
+            avatar_url: None,
+            email: Some("tim@timfeid.com".to_owned()),
+            password: Some(
+                "$2b$04$cd5jDDLNGsZ09QzNJ1vuKeol/rhqy0oGfV.aJvo/eOQfVzapKJyN6".to_owned(),
+            ),
         }
     }
 }
 
-impl Model<ChannelResource> for ChannelModel {
+impl Model<UserResource> for UserModel {
     fn id(&self) -> String {
-        self.slug.clone()
+        self.id.clone()
     }
 
-    fn to_node(&self) -> ChannelResource {
-        ChannelResource {
-            name: self.name.clone(),
+    fn to_node(&self) -> UserResource {
+        UserResource {
             id: self.id.clone(),
-            slug: self.slug.clone(),
+            username: self.username.clone(),
+            avatar_url: self.avatar_url.clone(),
         }
     }
 }
 
-impl ChannelRepository {
+impl UserRepository {
     pub fn new(connection: DatabasePool) -> Self {
         Self { connection }
-    }
-
-    pub fn find_by_slug(&self, slug: String) -> Result<ChannelModel, sqlx::Error> {
-        let name = slug
-            .chars()
-            .enumerate()
-            .map(|(i, c)| {
-                if i == 0 {
-                    c.to_uppercase().collect::<String>()
-                } else {
-                    c.to_string()
-                }
-            })
-            .collect::<String>();
-        Ok(ChannelModel::new(name))
     }
 }
 
 #[derive(Type, Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
-pub struct ChannelCursor {
+pub struct UserCursor {
     pub id: String,
 }
 
-impl Cursor for ChannelCursor {
-    type CursorType = ChannelCursor;
+impl Cursor for UserCursor {
+    type CursorType = UserCursor;
 
-    fn encode(cursor: &ChannelCursor) -> String {
+    fn encode(cursor: &UserCursor) -> String {
         let cursor_str = cursor.to_string();
         general_purpose::STANDARD.encode(cursor_str)
     }
 
-    fn decode(encoded: &str) -> Option<ChannelCursor> {
+    fn decode(encoded: &str) -> Option<UserCursor> {
         let decoded_bytes = general_purpose::STANDARD.decode(encoded).ok()?;
         let decoded_str = String::from_utf8(decoded_bytes).ok()?;
         serde_json::from_str(&decoded_str).ok()
@@ -94,7 +86,7 @@ impl Cursor for ChannelCursor {
     }
 }
 
-impl Display for ChannelCursor {
+impl Display for UserCursor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Serialize the FollowCursor to JSON and write it as a string
         match serde_json::to_string(self) {
@@ -104,8 +96,8 @@ impl Display for ChannelCursor {
     }
 }
 
-impl Repository<ChannelModel, ListChannelArgs> for ChannelRepository {
-    async fn count(&self, args: &ListChannelArgs) -> Result<i32, sqlx::Error> {
+impl Repository<UserModel, ListUserArgs> for UserRepository {
+    async fn count(&self, args: &ListUserArgs) -> Result<i32, sqlx::Error> {
         Ok(2)
     }
 
@@ -116,11 +108,12 @@ impl Repository<ChannelModel, ListChannelArgs> for ChannelRepository {
             impl crate::pagination::Cursor + Send,
         )>,
         take: i32,
-        args: &ListChannelArgs,
-    ) -> Result<Vec<ChannelModel>, sqlx::Error> {
+        args: &ListUserArgs,
+    ) -> Result<Vec<UserModel>, sqlx::Error> {
         Ok(vec![
-            ChannelModel::new("News".to_string()),
-            ChannelModel::new("Gameday".to_string()),
+            UserModel::new("tim".to_string(), "tim".to_string()),
+            UserModel::new("budda".to_string(), "budda".to_string()),
+            UserModel::new("agagaiinz".to_string(), "AgaGaiinz".to_string()),
         ])
     }
 }

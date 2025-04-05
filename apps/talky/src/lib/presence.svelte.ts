@@ -1,14 +1,13 @@
-import { setContext } from 'svelte';
-import { user, UserDetails } from './user.svelte.js';
+import { getContext } from 'svelte';
+import { user } from './user.svelte.js';
 
 interface ClientInfoMsg {
 	id: string;
-	role: string;
+	user_id: string;
 }
 
 interface ActiveClientsMessage {
-	type: 'active_clients';
-	join_code: string;
+	type: 'active_clients_update';
 	clients: ClientInfoMsg[];
 }
 
@@ -152,7 +151,7 @@ export class Presence {
 			this.lastMessage = message;
 
 			switch (message.type) {
-				case 'active_clients':
+				case 'active_clients_update':
 					this.activeClients = message.clients;
 					console.log('[Presence] Updated active clients:', this.activeClients.length);
 					break;
@@ -328,4 +327,8 @@ export class Presence {
 			return false;
 		}
 	}
+}
+
+export function withPresence() {
+	return getContext('presence') as Presence;
 }

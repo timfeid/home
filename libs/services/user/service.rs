@@ -5,18 +5,18 @@ use specta::Type;
 
 use crate::{
     pagination::{
-        connection_from_repository, Cursor, ListResult, Model, Node, PaginationArgs, WithPagination,
+        connection_from_repository, Cursor, ListResult, Node, PaginationArgs, WithPagination,
     },
     repository::Repository,
     DatabasePool,
 };
 
-use super::repository::{ChannelCursor, ChannelRepository};
+use super::repository::{UserCursor, UserRepository};
 
 #[derive(Type, Serialize, Deserialize, Default, Debug)]
-pub struct ListChannelMeta {}
+pub struct ListUserMeta {}
 
-impl WithPagination for ListChannelArgs {
+impl WithPagination for ListUserArgs {
     fn pagination(&self) -> PaginationArgs {
         PaginationArgs {
             before: self.before.clone(),
@@ -26,27 +26,27 @@ impl WithPagination for ListChannelArgs {
         }
     }
 
-    type Meta = ListChannelMeta;
-    type CursorType = ChannelCursor;
+    type Meta = ListUserMeta;
+    type CursorType = UserCursor;
 
     fn get_meta(&self) -> Self::Meta {
-        ListChannelMeta {}
+        ListUserMeta {}
     }
 
     fn to_cursor(&self, id: String) -> Self::CursorType {
         let mut cursor =
-            ChannelCursor::decode(&self.after.as_ref().map_or("", |v| v)).unwrap_or_default();
+            UserCursor::decode(&self.after.as_ref().map_or("", |v| v)).unwrap_or_default();
         cursor.id = id;
         cursor
     }
 }
 
-pub struct ChannelService {
-    repository: Arc<ChannelRepository>,
+pub struct UserService {
+    repository: Arc<UserRepository>,
 }
 
 #[derive(Type, Deserialize, Serialize, Debug)]
-pub struct ListChannelArgs {
+pub struct ListUserArgs {
     pub before: Option<String>,
     pub after: Option<String>,
     pub first: Option<i32>,
@@ -55,35 +55,30 @@ pub struct ListChannelArgs {
 }
 
 #[derive(Type, Serialize, Debug)]
-pub struct ChannelResource {
+pub struct UserResource {
     pub id: String,
-    pub name: String,
-    pub slug: String,
-    // category_tree: Vec<String>,
+    pub username: String,
+    pub avatar_url: Option<String>,
 }
 
-impl Node for ChannelResource {
+impl Node for UserResource {
     fn id(&self) -> String {
-        self.name.clone()
+        self.id.clone()
     }
 }
 
-impl ChannelService {
-    pub async fn list_for_user(
+impl UserService {
+    pub async fn list(
         &self,
-        args: ListChannelArgs,
-    ) -> Result<ListResult<ChannelResource, ListChannelMeta>, sqlx::Error> {
+        args: ListUserArgs,
+    ) -> Result<ListResult<UserResource, ListUserMeta>, sqlx::Error> {
         connection_from_repository(&args, self.repository.clone()).await
     }
 
     pub fn new(pool: DatabasePool) -> Self {
         Self {
-            repository: Arc::new(ChannelRepository::new(pool)),
+            repository: Arc::new(UserRepository::new(pool)),
         }
-    }
-
-    pub async fn find_by_slug(&self, slug: String) -> Result<ChannelResource, sqlx::Error> {
-        Ok(self.repository.find_by_slug(slug)?.to_node())
     }
 }
 
@@ -94,6 +89,7 @@ mod tests {
 
     use crate::{
         channel::service::{ChannelService, ListChannelArgs},
+        user::service::{ListUserArgs, UserService},
         DatabasePool,
     };
 
@@ -101,11 +97,11 @@ mod tests {
     async fn test() {
         let url = "postgresql://postgres:wat@0.0.0.0/gangsta";
         let pool: DatabasePool = create_connection(url).await;
-        let channel_service = ChannelService::new(pool);
+        let channel_service = UserService::new(pool);
         println!(
             "{:?}",
             channel_service
-                .list_for_user(ListChannelArgs {
+                .list(ListUserArgs {
                     before: None,
                     after: None,
                     first: None,

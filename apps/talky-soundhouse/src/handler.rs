@@ -68,6 +68,7 @@ async fn validate_initialization(
     let init_text = init_msg.to_str().map_err(|_| {
         AppError::InitializationError("Invalid UTF-8 in initial message".to_string())
     })?;
+    tracing::debug!("Init msg: {}", init_text);
 
     let init_data: IncomingMessage = serde_json::from_str(init_text).map_err(AppError::Json)?;
     let auth_code = parse_init_data(init_data)?;
