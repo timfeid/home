@@ -130,16 +130,8 @@ async fn handle_messages(
     state: AppState,
     client_id: &str,
 ) -> AppResult<()> {
-    let role = {
-        let rooms_guard = state.rooms.lock().await;
-        rooms_guard
-            .values()
-            .find_map(|r| r.clients.get(client_id).map(|c| c.role.clone()))
-            .unwrap_or_else(|| "unknown".to_string())
-    };
-
     while let Some(message_result) = receiver.next().await {
-        process_message(message_result, sender.clone(), &state, client_id, &role).await?;
+        process_message(message_result, sender.clone(), &state, client_id).await?;
     }
 
     tracing::info!("Client {} connection stream ended.", client_id);
@@ -151,12 +143,11 @@ async fn process_message(
     sender: ClientSender,
     state: &AppState,
     client_id: &str,
-    role: &str,
 ) -> AppResult<()> {
     match message_result {
         Ok(msg) if msg.is_text() => {
             let text = msg.to_str().unwrap_or("");
-            if let Err(e) = handle_text_message(text, state, client_id, role).await {
+            if let Err(e) = handle_text_message(text, state, client_id).await {
                 let err_msg = OutgoingMessage::Error {
                     message: format!("Error processing message: {:?}", e),
                 };
@@ -206,12 +197,7 @@ async fn process_non_text_message(
     Ok(())
 }
 
-async fn handle_text_message(
-    text: &str,
-    state: &AppState,
-    client_id: &str,
-    client_role: &str,
-) -> AppResult<()> {
+async fn handle_text_message(text: &str, state: &AppState, client_id: &str) -> AppResult<()> {
     match serde_json::from_str::<IncomingMessage>(text) {
         Ok(incoming_msg) => {
             tracing::debug!("Received message from {}: {:?}", client_id, incoming_msg);
