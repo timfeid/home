@@ -6,7 +6,7 @@
 	import { Users } from 'lucide-svelte';
 	import { onMount } from 'svelte';
 
-	let { channel }: { channel: Procedures['niche_find_by_slug']['output']; slug: string } = $props();
+	let { channel }: { channel: Procedures['niche_find_by_slug']['output'] } = $props();
 	let onlineUsers = $state<Procedures['channel_list_users']['output']['edges'][number]['node'][]>(
 		[]
 	);
@@ -22,7 +22,6 @@
 	});
 
 	const getStatusColor = (activeClients: typeof presence.activeClients, userId: string) => {
-		console.log(activeClients, userId);
 		let status = 'offline';
 
 		if (activeClients.some(({ user_id }) => user_id === userId)) {

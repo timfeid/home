@@ -53,7 +53,6 @@ export class UserDetails {
 		const token = ((await response.text()) || '').trim();
 
 		if (token) {
-			console.log('token fuond', token);
 			this.accessToken = token;
 		}
 

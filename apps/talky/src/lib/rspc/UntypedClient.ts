@@ -1,7 +1,7 @@
 import type { ExeceuteData, ExecuteArgs, ExecuteFn, SubscriptionObserver } from './types';
 
 export function observable<T>(
-	cb: (subscriber: { next: (value: T) => void; complete(): void }) => void,
+	cb: (subscriber: { next: (value: T) => void; complete(): void }) => void
 ) {
 	let callbacks: Array<(v: T) => void> = [];
 	let completeCallbacks: Array<() => void> = [];
@@ -16,7 +16,7 @@ export function observable<T>(
 			if (done) return;
 			done = true;
 			completeCallbacks.forEach((cb) => cb());
-		},
+		}
 	});
 
 	return {
@@ -30,7 +30,7 @@ export function observable<T>(
 		},
 		get done() {
 			return done;
-		},
+		}
 	};
 }
 
@@ -38,7 +38,7 @@ export type Observable<T> = ReturnType<typeof observable<T>>;
 
 export const fetchExecute = (
 	config: { url: string; accessToken?: string },
-	args: ExecuteArgs,
+	args: ExecuteArgs
 ): ReturnType<ExecuteFn> => {
 	if (args.type === 'subscription')
 		throw new Error('Subscriptions are not possible with the `fetch` executor');
@@ -47,15 +47,15 @@ export const fetchExecute = (
 	if (args.type === 'query') {
 		promise = fetch(
 			`${config.url}/${args.path}?${new URLSearchParams({
-				input: JSON.stringify(args.input),
+				input: JSON.stringify(args.input)
 			})}`,
 			{
 				method: 'GET',
 				headers: {
 					Accept: 'application/json',
-					Authorization: config.accessToken ? 'Bearer ' + config.accessToken : '',
-				},
-			},
+					Authorization: config.accessToken ? 'Bearer ' + config.accessToken : ''
+				}
+			}
 		);
 	} else {
 		promise = fetch(`${config.url}/${args.path}`, {
@@ -63,9 +63,9 @@ export const fetchExecute = (
 			headers: {
 				'Content-Type': 'application/json',
 				Accept: 'application/json',
-				Authorization: config.accessToken ? 'Bearer ' + config.accessToken : '',
+				Authorization: config.accessToken ? 'Bearer ' + config.accessToken : ''
 			},
-			body: JSON.stringify(args.input),
+			body: JSON.stringify(args.input)
 		});
 	}
 
@@ -97,7 +97,6 @@ export class UntypedClient {
 		});
 
 		if (!data) throw new Error('No data received');
-		console.log(data);
 		if (data.result.type === 'error') {
 			return { status: 'error', error: data?.result.data };
 		}
@@ -114,7 +113,7 @@ export class UntypedClient {
 	public subscription(
 		path: string,
 		input: unknown,
-		opts?: Partial<SubscriptionObserver<unknown, unknown>>,
+		opts?: Partial<SubscriptionObserver<unknown, unknown>>
 	) {
 		const observable = this.execute({ type: 'subscription', path, input });
 		console.log('hi');

@@ -16,13 +16,43 @@ interface ErrorMessage {
 	message: string;
 }
 
-type IncomingServerMessage = ActiveClientsMessage | ErrorMessage;
+export interface ChatMessage {
+	type: 'chat_message_broadcast';
+	message: string;
+	content: string;
+	channel_id: string;
+	user_id: string;
+	timestamp: string;
+}
+
+export type IncomingServerMessage = ActiveClientsMessage | ErrorMessage | ChatMessage;
 
 const SOUNDHOUSE_URL = 'ws://localhost:8080/soundhouse';
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 3000;
 
-export class Presence {
+class EventEmitter {
+	private events: { [key: string]: CallableFunction[] } = {};
+
+	on(event: string, listener: CallableFunction) {
+		if (!this.events[event]) {
+			this.events[event] = [];
+		}
+		this.events[event].push(listener);
+	}
+
+	off(event: string, listener: CallableFunction) {
+		if (!this.events[event]) return;
+		this.events[event] = this.events[event].filter((l) => l !== listener);
+	}
+
+	emit(event: string, ...args: unknown[]) {
+		if (!this.events[event]) return;
+		this.events[event].forEach((listener) => listener(...args));
+	}
+}
+
+export class Presence extends EventEmitter {
 	socket = $state<WebSocket | null>(null);
 
 	status = $state<'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed' | 'error'>('idle');
@@ -132,7 +162,8 @@ export class Presence {
 			role: 'presence'
 		};
 		try {
-			console.log('[Presence] Sending init message:', initMsg);
+			this.emit('connectionOpen', initMsg);
+			console.log('[Presence] Sending init message');
 			ws.send(JSON.stringify(initMsg));
 		} catch (err) {
 			console.error('[Presence] Failed to send init message immediately after open:', err);
@@ -153,18 +184,25 @@ export class Presence {
 			switch (message.type) {
 				case 'active_clients_update':
 					this.activeClients = message.clients;
+					this.emit('activeClientsUpdated', this.activeClients);
 					console.log('[Presence] Updated active clients:', this.activeClients.length);
 					break;
 				case 'error':
 					console.error('[Presence] Received server error message:', message.message);
-
+					this.emit('serverError', message.message);
+					break;
+				case 'chat_message_broadcast':
+					window.dispatchEvent(new CustomEvent('chat', { detail: message }));
+					this.emit('chatMessageReceived', message);
 					break;
 
 				default:
-					console.warn('[Presence] Received unhandled message type:', (message as any)?.type);
+					console.warn('[Presence] Received unhandled message :', message);
+					this.emit('unhandledMessage', message);
 			}
 		} catch (error) {
 			console.error('[Presence] Error parsing received message:', error, 'Raw data:', event.data);
+			this.emit('messageParsingError', error, event.data);
 		}
 	}
 
@@ -172,8 +210,8 @@ export class Presence {
 		if (this.socket !== ws) return;
 
 		console.error('[Presence] WebSocket error event:', event);
-
 		this.error = event;
+		this.emit('socketError', event);
 	}
 
 	private handleClose(ws: WebSocket, event: CloseEvent): void {
@@ -186,6 +224,7 @@ export class Presence {
 			`[Presence] WebSocket connection closed. Code: ${event.code}, Reason: "${event.reason}", Clean: ${event.wasClean}, ExplicitlyClosed: ${this.explicitlyClosed}`
 		);
 		this.socket = null;
+		this.emit('connectionClosed', event);
 		this.clearRetryTimer();
 
 		const shouldAttemptRetry =
@@ -219,10 +258,12 @@ export class Presence {
 				console.error(`[Presence] Max retries (${MAX_RETRIES}) reached. Setting status to error.`);
 				this.status = 'error';
 				this.error = this.error || new Error(`Connection failed after ${MAX_RETRIES} retries.`);
+				this.emit('maxRetriesExceeded');
 			} else if (!user.accessToken) {
 				console.log('[Presence] User logged out. Setting status to idle.');
 				this.status = 'idle';
 				this.retryCount = 0;
+				this.emit('userLoggedOut');
 			} else {
 				console.log(
 					`[Presence] Setting status to closed (Explicit: ${this.explicitlyClosed}, Code: ${event.code}).`
@@ -305,8 +346,7 @@ export class Presence {
 		this.retryCount = 0;
 	}
 
-	/** Sends a JSON message over the WebSocket connection if open. */
-	sendMessage(message: object): boolean {
+	async sendMessage(message: object): Promise<boolean> {
 		if (!this.socket || this.status !== 'open') {
 			console.error(
 				`[Presence SendMessage] Cannot send message, WebSocket status is not 'open' (Status: ${this.status}).`
@@ -315,8 +355,9 @@ export class Presence {
 		}
 		try {
 			const jsonMessage = JSON.stringify(message);
-			this.socket.send(jsonMessage);
+			await this.socket.send(jsonMessage);
 			console.debug('[Presence SendMessage] Sent message:', message);
+			this.emit('messageSent', message);
 			return true;
 		} catch (error) {
 			console.error('[Presence SendMessage] Error sending message:', error);
@@ -324,6 +365,7 @@ export class Presence {
 			this.error = error instanceof Error ? error : new Error('WebSocket send failed');
 			this.explicitlyClosed = true;
 			this.socket?.close(1011, 'Send message failed');
+			this.emit('sendMessageFailed', error);
 			return false;
 		}
 	}

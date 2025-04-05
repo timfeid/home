@@ -205,26 +205,28 @@ impl AppState {
 
     pub async fn handle_chat_message(
         &self,
-        join_code: &str,
         sender_id: &str,
-        sender_role: &str,
+        channel_id: String,
         content: String,
-    ) {
-        let rooms_guard = self.rooms_lock().await;
-        if let Some(room) = rooms_guard.get(join_code) {
+    ) -> AppResult<()> {
+        let user_id = {
+            self.clients
+                .lock()
+                .await
+                .get(sender_id)
+                .and_then(|s| Some(s.user_id.clone()))
+        };
+        if let Some(user_id) = user_id {
             let message = OutgoingMessage::ChatMessageBroadcast {
                 sender_id: (*sender_id).to_string(),
-                sender_role: sender_role.to_string(),
+                user_id,
+                channel_id,
                 content,
             };
-            room.broadcast_except(sender_id, &message).await;
-        } else {
-            tracing::warn!(
-                "Cannot broadcast chat message: Room '{}' not found for sender {}",
-                join_code,
-                sender_id
-            );
+
+            self.broadcast_all(&message).await;
         }
+        Ok(())
     }
 
     async fn get_client_info_msgs(&self) -> Vec<ClientInfoMsg> {

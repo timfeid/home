@@ -222,6 +222,14 @@ async fn handle_text_message(
                         client_id
                     );
                 }
+                IncomingMessage::ChatMessage {
+                    content,
+                    channel_id,
+                } => {
+                    state
+                        .handle_chat_message(client_id, channel_id, content)
+                        .await?
+                }
                 IncomingMessage::WebRtcSignal {
                     target_client_id,
                     signal_data,

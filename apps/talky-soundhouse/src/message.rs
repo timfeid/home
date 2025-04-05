@@ -7,9 +7,10 @@ pub enum IncomingMessage {
     Init {
         auth_code: String,
     },
-    // ChatMessage {
-    //     content: String,
-    // },
+    ChatMessage {
+        content: String,
+        channel_id: String,
+    },
     WebRtcSignal {
         target_client_id: String,
         signal_data: Value,
@@ -25,8 +26,9 @@ pub enum OutgoingMessage {
 
     ChatMessageBroadcast {
         sender_id: String,
-        sender_role: String,
         content: String,
+        user_id: String,
+        channel_id: String,
     },
 
     WebRtcSignal {

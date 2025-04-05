@@ -23,7 +23,7 @@
 {/if} -->
 
 {#if channel}
-	{#if channel.slug === 'gameday'}
+	{#if channel.slug !== 'news'}
 		<ChatArea {channel} />
 	{:else}
 		<NewsList />
