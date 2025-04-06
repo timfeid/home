@@ -7,7 +7,7 @@ use std::{
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use sqlx::query;
+use sqlx::{query, query_as};
 
 use crate::{
     pagination::{Cursor, Model},
@@ -26,6 +26,7 @@ pub(crate) struct ChannelModel {
     pub(super) name: String,
     pub(super) slug: String,
     pub(super) r#type: ChannelType,
+    pub(super) niche_id: String,
 }
 
 impl ChannelModel {
@@ -41,6 +42,7 @@ impl ChannelModel {
                 ChannelType::MultiMedia
             },
             name,
+            niche_id: "".to_string(),
         }
     }
 }
@@ -128,7 +130,16 @@ impl Display for ChannelCursor {
 
 impl Repository<ChannelModel, ListChannelArgs> for ChannelRepository {
     async fn count(&self, args: &ListChannelArgs) -> Result<i32, sqlx::Error> {
-        Ok(2)
+        let row = query!(
+            r#"select
+                count(*) as count
+                from channels where niche_id = $1"#,
+            args.niche_id
+        )
+        .fetch_one(self.connection.as_ref())
+        .await?;
+
+        Ok(row.count.unwrap_or_else(|| 0).try_into().unwrap())
     }
 
     async fn find(
@@ -140,9 +151,19 @@ impl Repository<ChannelModel, ListChannelArgs> for ChannelRepository {
         take: i32,
         args: &ListChannelArgs,
     ) -> Result<Vec<ChannelModel>, sqlx::Error> {
-        Ok(vec![
-            ChannelModel::new("News".to_string()),
-            ChannelModel::new("Gameday".to_string()),
-        ])
+        query_as!(
+            ChannelModel,
+            r#"select
+                id,
+                name,
+                slug,
+                type as "type: ChannelType",
+                niche_id
+
+                from channels where niche_id = $1"#,
+            args.niche_id
+        )
+        .fetch_all(self.connection.as_ref())
+        .await
     }
 }

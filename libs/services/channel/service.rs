@@ -8,6 +8,7 @@ use crate::{
     pagination::{
         connection_from_repository, Cursor, ListResult, Model, Node, PaginationArgs, WithPagination,
     },
+    repository::Repository,
     DatabasePool,
 };
 
@@ -63,8 +64,9 @@ pub struct ChannelResource {
     // category_tree: Vec<String>,
 }
 
-#[derive(Type, Serialize, Deserialize, Debug, Clone)]
+#[derive(sqlx::Type, Type, Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "channel_type", rename_all = "snake_case")]
 pub enum ChannelType {
     Chat,
     Feed,
@@ -78,6 +80,13 @@ impl Node for ChannelResource {
 }
 
 impl ChannelService {
+    pub async fn list(
+        &self,
+        args: &ListChannelArgs,
+    ) -> Result<ListResult<ChannelResource, ListChannelMeta>, sqlx::Error> {
+        connection_from_repository(args, self.repository.clone()).await
+    }
+
     pub async fn list_for_user(&self, user_id: &str) -> Result<Vec<ChannelResource>, sqlx::Error> {
         Ok(self
             .repository
@@ -112,6 +121,17 @@ mod tests {
         let url = "postgresql://postgres:wat@0.0.0.0/gangsta";
         let pool: DatabasePool = create_connection(url).await;
         let channel_service = ChannelService::new(pool);
-        println!("{:?}", channel_service.list_for_user(&"tim").await);
+        println!(
+            "{:?}",
+            channel_service
+                .list(&ListChannelArgs {
+                    before: None,
+                    after: None,
+                    first: None,
+                    last: None,
+                    niche_id: "devils".to_owned()
+                })
+                .await
+        );
     }
 }

@@ -26,6 +26,19 @@ pub struct ChannelController {
 }
 
 impl ChannelController {
+    pub async fn list(
+        self,
+        args: ListChannelArgs,
+    ) -> AppResult<ListResult<ChannelResource, ListChannelMeta>> {
+        let response = self
+            .channel_service
+            .list(&args)
+            .await
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+        Ok(response)
+    }
+
     pub async fn find_by_slug(self, slug: String) -> AppResult<ChannelResource> {
         let response = self
             .channel_service
