@@ -1,9 +1,10 @@
 <script lang="ts">
+	import { Avatar, AvatarFallback, AvatarImage } from '$lib/components/ui/avatar';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils';
-	import { AudioLines, ChevronUp, Hash, MessageSquare } from 'lucide-svelte';
+	import { AudioLines, ChevronDown, ChevronUp, Hash, MessageSquare, Plus } from 'lucide-svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { user } from '$lib/user.svelte';
 	import type { Niche } from './niche.svelte';
@@ -13,13 +14,45 @@
 	let { niche }: { niche: Niche } = $props();
 	let channels = $state<Procedures['channel_list']['output']['edges'][number]['node'][]>([]);
 	let channelsSlug = $state('');
+
 	let pageInfo: PageInfo | undefined = $state();
+
+	let currentChannel = $state('');
+	function joinChannel(slug: string) {
+		currentChannel = slug;
+	}
+
+	let creatingTemporaryChannelName = $state('');
+	async function createTemporaryChannel() {
+		const randomChannelName = `${user.user!.sub}-${Math.random().toString(36).substring(2, 7)}`;
+		creatingTemporaryChannelName = randomChannelName;
+		try {
+			const response = wrapResponse(
+				await client.channel_create_temporary.query({
+					name: randomChannelName,
+					niche_id: niche.id,
+					type: 'multi_media'
+				})
+			);
+
+			channels.push(response);
+		} catch (e) {}
+
+		creatingTemporaryChannelName = '';
+	}
 
 	async function resetChannels() {
 		const response = wrapResponse(await client.channel_list.query({ niche_id: niche.id }));
 		pageInfo = response.page_info;
 		channels = response.edges.map((edge) => edge.node);
 	}
+
+	const permChannels = $derived.by(() => {
+		return channels.filter((channel) => !channel.is_temporary);
+	});
+	const temporaryChannels = $derived.by(() => {
+		return channels.filter((channel) => channel.is_temporary);
+	});
 
 	$effect(() => {
 		if (channelsSlug !== niche.slug) {
@@ -29,17 +62,97 @@
 </script>
 
 <Sidebar.Root>
+	<Sidebar.Header>
+		<Sidebar.Menu>
+			<Sidebar.MenuItem>
+				<DropdownMenu.Root>
+					<DropdownMenu.Trigger>
+						{#snippet child({ props })}
+							<Sidebar.MenuButton {...props}>
+								{niche.name}
+								<ChevronDown class="ml-auto" />
+							</Sidebar.MenuButton>
+						{/snippet}
+					</DropdownMenu.Trigger>
+					<DropdownMenu.Content class="w-[--bits-dropdown-menu-anchor-width]">
+						<DropdownMenu.Item>
+							{#snippet child({ props })}
+								<a href="/of/devils/gameday" {...props}>Devils</a>
+							{/snippet}
+						</DropdownMenu.Item>
+						<DropdownMenu.Item>
+							{#snippet child({ props })}
+								<a href="/of/pirate/movie-releases" {...props}>Pirate</a>
+							{/snippet}
+						</DropdownMenu.Item>
+					</DropdownMenu.Content>
+				</DropdownMenu.Root>
+			</Sidebar.MenuItem>
+		</Sidebar.Menu>
+	</Sidebar.Header>
 	<Sidebar.Content>
 		<Sidebar.Group>
-			<Sidebar.GroupLabel>{niche.name}</Sidebar.GroupLabel>
+			<Sidebar.GroupLabel>Temporary Channels</Sidebar.GroupLabel>
+			<Sidebar.GroupAction onclick={createTemporaryChannel} title="Create temporary channel">
+				<Plus class="!size-3.5" />
+				<span class="sr-only">Create temporary channel</span>
+			</Sidebar.GroupAction>
 			<Sidebar.GroupContent>
 				<Sidebar.Menu>
-					{#each channels as channel}
+					{#if creatingTemporaryChannelName}
+						<Sidebar.MenuItem>
+							<Sidebar.MenuButton class={'opacity-50'}>
+								<div class="flex flex-1 items-center overflow-hidden">
+									<AudioLines class="mr-1.5 h-4 w-4 flex-shrink-0" />
+									<span class="truncate font-light">{creatingTemporaryChannelName}</span>
+								</div>
+							</Sidebar.MenuButton>
+						</Sidebar.MenuItem>
+					{/if}
+					{#each temporaryChannels as channel}
+						<Sidebar.MenuItem>
+							<Sidebar.MenuButton onclick={() => joinChannel(channel)}>
+								<div class="flex flex-1 items-center overflow-hidden">
+									{#if channel.type === 'chat'}
+										<MessageSquare class="mr-1.5 h-4 w-4 flex-shrink-0" />
+									{:else if channel.type === 'feed'}
+										<Hash class="mr-1.5 h-4 w-4 flex-shrink-0" />
+									{:else}
+										<AudioLines class="mr-1.5 h-4 w-4 flex-shrink-0" />
+									{/if}
+									<span class="truncate font-light">{channel.name}</span>
+								</div>
+							</Sidebar.MenuButton>
+							{#if currentChannel === channel}
+								<Sidebar.MenuSub>
+									<Sidebar.MenuSubItem>
+										<Sidebar.MenuSubButton class="h-auto py-1">
+											<Avatar class="mr-2 h-6 w-6">
+												<!-- <AvatarImage src={user.user!.avatar_url} alt={user.user!.username} /> -->
+												<AvatarFallback class="bg-teal-900 text-xs text-zinc-300">
+													{user.user!.sub.substring(0, 1).toUpperCase()}
+												</AvatarFallback>
+											</Avatar>
+											{user.user!.sub}
+										</Sidebar.MenuSubButton>
+									</Sidebar.MenuSubItem>
+								</Sidebar.MenuSub>
+							{/if}
+						</Sidebar.MenuItem>
+					{/each}
+				</Sidebar.Menu>
+			</Sidebar.GroupContent>
+		</Sidebar.Group>
+		<Sidebar.Group>
+			<Sidebar.GroupLabel>Permanent Channels</Sidebar.GroupLabel>
+			<Sidebar.GroupContent>
+				<Sidebar.Menu>
+					{#each permChannels as channel}
 						<Sidebar.MenuItem>
 							<Sidebar.MenuButton>
 								{#snippet child({ props })}
 									<a
-										href="/of/devils/{channel.slug}"
+										href="/of/{niche.slug}/{channel.slug}"
 										{...props}
 										class={cn(
 											props.class || '',

@@ -6,6 +6,7 @@ use std::{
 
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
+use slugify::slugify;
 use specta::Type;
 use sqlx::{query, query_as};
 
@@ -15,7 +16,7 @@ use crate::{
     DatabasePool,
 };
 
-use super::service::{ChannelResource, ChannelType, ListChannelArgs};
+use super::service::{ChannelResource, ChannelType, CreateChannelArgs, ListChannelArgs};
 
 pub(crate) struct ChannelRepository {
     connection: DatabasePool,
@@ -27,6 +28,7 @@ pub(crate) struct ChannelModel {
     pub(super) slug: String,
     pub(super) r#type: ChannelType,
     pub(super) niche_id: String,
+    pub(super) is_temporary: bool,
 }
 
 impl ChannelModel {
@@ -43,6 +45,7 @@ impl ChannelModel {
             },
             name,
             niche_id: "".to_string(),
+            is_temporary: false,
         }
     }
 }
@@ -58,6 +61,7 @@ impl Model<ChannelResource> for ChannelModel {
             id: self.id.clone(),
             slug: self.slug.clone(),
             r#type: self.r#type.clone(),
+            is_temporary: self.is_temporary.clone(),
         }
     }
 }
@@ -87,6 +91,24 @@ impl ChannelRepository {
             })
             .collect::<String>();
         Ok(ChannelModel::new(name))
+    }
+
+    pub async fn create(&self, args: &CreateChannelArgs) -> Result<ChannelModel, sqlx::Error> {
+        let id = ulid::Ulid::new().to_string();
+        let slug = slugify!(&args.name);
+
+        query_as!(
+                    ChannelModel,
+                    "insert into channels (id, name, slug, type, niche_id, is_temporary) values ($1, $2, $3, $4, $5, true) returning id, name, is_temporary, slug, type as \"type: ChannelType\", niche_id",
+
+                    id,
+                    args.name,
+                    slug,
+                    args.r#type as ChannelType,
+                    args.niche_id,
+                )
+                .fetch_one(self.connection.as_ref())
+                .await
     }
 }
 
@@ -158,8 +180,8 @@ impl Repository<ChannelModel, ListChannelArgs> for ChannelRepository {
                 name,
                 slug,
                 type as "type: ChannelType",
-                niche_id
-
+                niche_id,
+                is_temporary
                 from channels where niche_id = $1"#,
             args.niche_id
         )

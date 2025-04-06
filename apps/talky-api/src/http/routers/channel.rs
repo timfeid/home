@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use rspc::Router;
 use talky_services::{
-    channel::service::ListChannelArgs, message::service::ListMessageArgs,
+    channel::service::{CreateChannelArgs, ListChannelArgs},
+    message::service::ListMessageArgs,
     user::service::ListUserArgs,
 };
 
@@ -33,6 +34,10 @@ pub fn create_channel_router() -> Router<Ctx> {
         .procedure("channel_messages", {
             <BaseProcedure>::builder()
                 .query(|ctx, args: ListMessageArgs| ChannelController::new(ctx).list_messages(args))
+        })
+        .procedure("channel_create_temporary", {
+            <BaseProcedure>::builder()
+                .query(|ctx, args: CreateChannelArgs| ChannelController::new(ctx).create(args))
         })
         .procedure("channel_list_in", {
             <BaseProcedure>::builder()

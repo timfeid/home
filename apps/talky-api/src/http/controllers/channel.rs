@@ -1,7 +1,10 @@
 use bcrypt::verify;
 use sqlx::{Pool, Postgres};
 use talky_services::{
-    channel::service::{ChannelResource, ChannelService, ListChannelArgs, ListChannelMeta},
+    channel::service::{
+        ChannelResource, ChannelService, ChannelType, CreateChannelArgs, ListChannelArgs,
+        ListChannelMeta,
+    },
     message::service::{ListMessageArgs, ListMessageMeta, MessageResource, MessageService},
     pagination::ListResult,
     user::service::{ListUserArgs, ListUserMeta, UserResource, UserService},
@@ -69,6 +72,23 @@ impl ChannelController {
         let response = self
             .user_service
             .list(&args)
+            .await
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+        Ok(response)
+    }
+
+    pub async fn create(self, args: CreateChannelArgs) -> AppResult<ChannelResource> {
+        let user = self.ctx.required_user()?;
+        if !matches!(args.r#type, ChannelType::MultiMedia) {
+            return Err(AppError::BadRequest(
+                "multi_media type only supported".to_string(),
+            ));
+        }
+
+        let response = self
+            .channel_service
+            .create(&args)
             .await
             .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 

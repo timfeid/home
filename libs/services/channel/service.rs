@@ -55,16 +55,30 @@ pub struct ListChannelArgs {
     pub niche_id: String,
 }
 
+pub enum TemporaryContract {
+    ExpireWhenEmpty,
+    Expires { expires: i32 },
+}
+
+#[derive(Type, Deserialize, Serialize, Debug)]
+pub struct CreateChannelArgs {
+    pub name: String,
+    pub niche_id: String,
+    pub r#type: ChannelType,
+    // pub expire_contract: Option<String>,
+}
+
 #[derive(Type, Serialize, Debug)]
 pub struct ChannelResource {
     pub id: String,
     pub name: String,
     pub slug: String,
     pub r#type: ChannelType,
+    pub is_temporary: bool,
     // category_tree: Vec<String>,
 }
 
-#[derive(sqlx::Type, Type, Serialize, Deserialize, Debug, Clone)]
+#[derive(PartialEq, sqlx::Type, Type, Serialize, Deserialize, Debug, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "channel_type", rename_all = "snake_case")]
 pub enum ChannelType {
@@ -101,6 +115,10 @@ impl ChannelService {
         Self {
             repository: Arc::new(ChannelRepository::new(pool)),
         }
+    }
+
+    pub async fn create(&self, args: &CreateChannelArgs) -> Result<ChannelResource, sqlx::Error> {
+        Ok(self.repository.create(args).await?.to_node())
     }
 
     pub async fn find_by_slug(&self, slug: String) -> Result<ChannelResource, sqlx::Error> {
