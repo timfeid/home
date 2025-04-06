@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { client } from '$lib/client';
+	import UserList from '$lib/user-list/user-list.svelte';
 	import type { Procedures } from '@feid/bindings';
 	import { onMount, type Snippet } from 'svelte';
 
@@ -17,5 +18,10 @@
 </script>
 
 {#if niche}
-	{@render withNiche({ niche })}
+	<div class="flex flex-1 flex-col">
+		{@render withNiche({ niche })}
+	</div>
+	<div>
+		<UserList {niche} />
+	</div>
 {/if}

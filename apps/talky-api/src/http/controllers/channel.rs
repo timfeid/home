@@ -49,33 +49,24 @@ impl ChannelController {
         Ok(response)
     }
 
-    pub async fn list_users(self, id: String) -> AppResult<ListResult<UserResource, ListUserMeta>> {
+    pub async fn list_users(
+        self,
+        args: ListUserArgs,
+    ) -> AppResult<ListResult<UserResource, ListUserMeta>> {
         let response = self
             .user_service
-            .list(ListUserArgs {
-                before: None,
-                after: None,
-                first: None,
-                last: None,
-                niche_id: "temp_niche_id".to_string(),
-            })
+            .list(&args)
             .await
             .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 
         Ok(response)
     }
 
-    pub async fn list_in(self) -> AppResult<ListResult<ChannelResource, ListChannelMeta>> {
+    pub async fn list_in(self) -> AppResult<Vec<ChannelResource>> {
         let user = self.ctx.required_user()?;
         let response = self
             .channel_service
-            .list_for_user(ListChannelArgs {
-                before: None,
-                after: None,
-                first: None,
-                last: None,
-                niche_id: "temp_niche_id".to_string(),
-            })
+            .list_for_user(&user.sub)
             .await
             .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 

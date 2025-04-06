@@ -9,15 +9,13 @@
 <Layout>
 	<ChannelsSidebar />
 
-	<div class="flex flex-1 flex-col">
-		{#key page.params.niche}
-			<Niche slug={page.params.niche}>
-				{#snippet withNiche({ niche })}
-					{#key page.params.channel}
-						<Channel {niche} slug={page.params.channel} />
-					{/key}
-				{/snippet}
-			</Niche>
-		{/key}
-	</div>
+	{#key page.params.niche}
+		<Niche slug={page.params.niche}>
+			{#snippet withNiche({ niche })}
+				{#key page.params.channel}
+					<Channel {niche} slug={page.params.channel} />
+				{/key}
+			{/snippet}
+		</Niche>
+	{/key}
 </Layout>

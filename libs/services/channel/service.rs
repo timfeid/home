@@ -11,7 +11,7 @@ use crate::{
     DatabasePool,
 };
 
-use super::repository::{ChannelCursor, ChannelRepository};
+use super::repository::{ChannelCursor, ChannelModel, ChannelRepository};
 
 #[derive(Type, Serialize, Deserialize, Default, Debug)]
 pub struct ListChannelMeta {}
@@ -69,11 +69,14 @@ impl Node for ChannelResource {
 }
 
 impl ChannelService {
-    pub async fn list_for_user(
-        &self,
-        args: ListChannelArgs,
-    ) -> Result<ListResult<ChannelResource, ListChannelMeta>, sqlx::Error> {
-        connection_from_repository(&args, self.repository.clone()).await
+    pub async fn list_for_user(&self, user_id: &str) -> Result<Vec<ChannelResource>, sqlx::Error> {
+        Ok(self
+            .repository
+            .list_for_user(user_id)
+            .await?
+            .iter()
+            .map(|channel| channel.to_node())
+            .collect())
     }
 
     pub fn new(pool: DatabasePool) -> Self {
@@ -83,7 +86,7 @@ impl ChannelService {
     }
 
     pub async fn find_by_slug(&self, slug: String) -> Result<ChannelResource, sqlx::Error> {
-        Ok(self.repository.find_by_slug(slug)?.to_node())
+        Ok(self.repository.find_by_slug(slug).await?.to_node())
     }
 }
 
@@ -100,17 +103,6 @@ mod tests {
         let url = "postgresql://postgres:wat@0.0.0.0/gangsta";
         let pool: DatabasePool = create_connection(url).await;
         let channel_service = ChannelService::new(pool);
-        println!(
-            "{:?}",
-            channel_service
-                .list_for_user(ListChannelArgs {
-                    before: None,
-                    after: None,
-                    first: None,
-                    last: None,
-                    niche_id: "".to_string()
-                })
-                .await
-        );
+        println!("{:?}", channel_service.list_for_user(&"tim").await);
     }
 }

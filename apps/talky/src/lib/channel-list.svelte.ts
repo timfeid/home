@@ -8,7 +8,7 @@ export type ListedChannel = Procedures['channel_list_in']['output'];
 
 export class ChannelList {
 	private currentUserId: undefined | string = $state(undefined);
-	channels: ListedChannel['edges'][number]['node'] = $state([]);
+	channels: ListedChannel = $state([]);
 	constructor() {
 		$effect(() => {
 			if (browser && user.user?.sub !== this.currentUserId) {
@@ -22,7 +22,7 @@ export class ChannelList {
 		if (this.currentUserId) {
 			const response = await client.channel_list_in.query('');
 			if (response.status === 'ok') {
-				this.channels = response.data.edges.map((edge) => edge.node);
+				this.channels = response.data;
 			}
 		}
 	}

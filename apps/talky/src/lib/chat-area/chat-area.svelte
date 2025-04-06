@@ -4,7 +4,6 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { withPresence, type ChatMessage } from '$lib/presence.svelte';
-	import UserList from '$lib/user-list/user-list.svelte';
 	import type { Procedures } from '@feid/bindings';
 	import { AtSign, Paperclip, Send, Smile } from 'lucide-svelte';
 	import { onMount } from 'svelte';
@@ -147,8 +146,5 @@
 				</div>
 			</div>
 		</form>
-	</div>
-	<div>
-		<UserList {channel} />
 	</div>
 </div>

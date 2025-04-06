@@ -6,18 +6,16 @@
 	import { Users } from 'lucide-svelte';
 	import { onMount } from 'svelte';
 
-	let { channel }: { channel: Procedures['niche_find_by_slug']['output'] } = $props();
+	let { niche }: { niche: Procedures['niche_find_by_slug']['output'] } = $props();
 	let onlineUsers = $state<Procedures['channel_list_users']['output']['edges'][number]['node'][]>(
 		[]
 	);
-	let pageInfo = $state<Procedures['channel_list_users']['output']['page_info']>();
 	const presence = withPresence();
 
 	onMount(async () => {
-		const response = await client.channel_list_users.query(channel.id);
+		const response = await client.channel_list_users.query({ niche_id: niche.id });
 		if (response.status === 'ok') {
-			pageInfo = response.data.page_info;
-			onlineUsers.push(...response.data.edges.map((edge) => edge.node));
+			onlineUsers = response.data.edges.map((edge) => edge.node);
 		}
 	});
 

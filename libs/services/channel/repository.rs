@@ -55,7 +55,14 @@ impl ChannelRepository {
         Self { connection }
     }
 
-    pub fn find_by_slug(&self, slug: String) -> Result<ChannelModel, sqlx::Error> {
+    pub async fn list_for_user(&self, user_id: &str) -> Result<Vec<ChannelModel>, sqlx::Error> {
+        Ok(vec![
+            ChannelModel::new("News".to_string()),
+            ChannelModel::new("Gameday".to_string()),
+        ])
+    }
+
+    pub async fn find_by_slug(&self, slug: String) -> Result<ChannelModel, sqlx::Error> {
         let name = slug
             .chars()
             .enumerate()

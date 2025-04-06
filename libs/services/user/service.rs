@@ -70,9 +70,9 @@ impl Node for UserResource {
 impl UserService {
     pub async fn list(
         &self,
-        args: ListUserArgs,
+        args: &ListUserArgs,
     ) -> Result<ListResult<UserResource, ListUserMeta>, sqlx::Error> {
-        connection_from_repository(&args, self.repository.clone()).await
+        connection_from_repository(args, self.repository.clone()).await
     }
 
     pub fn new(pool: DatabasePool) -> Self {
@@ -97,18 +97,14 @@ mod tests {
     async fn test() {
         let url = "postgresql://postgres:wat@0.0.0.0/gangsta";
         let pool: DatabasePool = create_connection(url).await;
+        let args = ListUserArgs {
+            before: None,
+            after: None,
+            first: None,
+            last: None,
+            niche_id: "".to_string(),
+        };
         let channel_service = UserService::new(pool);
-        println!(
-            "{:?}",
-            channel_service
-                .list(ListUserArgs {
-                    before: None,
-                    after: None,
-                    first: None,
-                    last: None,
-                    niche_id: "".to_string()
-                })
-                .await
-        );
+        println!("{:?}", channel_service.list(&args).await);
     }
 }
