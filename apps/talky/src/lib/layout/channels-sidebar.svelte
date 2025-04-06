@@ -3,56 +3,8 @@
 	import { withChannelList } from '$lib/channel-list.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils';
-	import { Hash, MessageSquare } from 'lucide-svelte';
-	const state = $state({
-		activeChannel: ['sports', 'hockey', 'nhl', 'devils', 'news'],
-		showBrowse: false
-	});
+	import { AudioLines, Hash, MessageSquare } from 'lucide-svelte';
 
-	// const joinedChannels: Channel[] = [
-	// 	{
-	// 		id: 'devils-news',
-	// 		name: 'Devils News',
-	// 		path: ['sports', 'hockey', 'nhl', 'devils', 'news'],
-	// 		type: 'news',
-	// 		teamLogo: '/placeholder.svg?height=24&width=24',
-	// 		teamName: 'Devils',
-	// 		unread: 3
-	// 	},
-	// 	{
-	// 		id: 'devils-gameday',
-	// 		name: 'Devils Gameday',
-	// 		path: ['sports', 'hockey', 'nhl', 'devils', 'gameday'],
-	// 		type: 'chat',
-	// 		teamLogo: '/placeholder.svg?height=24&width=24',
-	// 		teamName: 'Devils'
-	// 	},
-	// 	{
-	// 		id: 'devils-memes',
-	// 		name: 'Devils Memes',
-	// 		path: ['sports', 'hockey', 'nhl', 'devils', 'memes'],
-	// 		type: 'news',
-	// 		teamLogo: '/placeholder.svg?height=24&width=24',
-	// 		teamName: 'Devils'
-	// 	},
-	// 	{
-	// 		id: 'rangers-news',
-	// 		name: 'Rangers News',
-	// 		path: ['sports', 'hockey', 'nhl', 'rangers', 'news'],
-	// 		type: 'news',
-	// 		teamLogo: '/placeholder.svg?height=24&width=24',
-	// 		teamName: 'Rangers',
-	// 		unread: 5
-	// 	},
-	// 	{
-	// 		id: 'javascript-help',
-	// 		name: 'JavaScript Help',
-	// 		path: ['tech', 'programming', 'javascript', 'help'],
-	// 		type: 'chat',
-	// 		teamLogo: '/placeholder.svg?height=24&width=24',
-	// 		teamName: 'JS'
-	// 	}
-	// ];
 	const channels = withChannelList();
 </script>
 
@@ -71,8 +23,10 @@
 				<div class="flex flex-1 items-center overflow-hidden">
 					{#if channel.type === 'chat'}
 						<MessageSquare class="mr-1.5 h-4 w-4 flex-shrink-0" />
-					{:else}
+					{:else if channel.type === 'feed'}
 						<Hash class="mr-1.5 h-4 w-4 flex-shrink-0" />
+					{:else}
+						<AudioLines class="mr-1.5 h-4 w-4 flex-shrink-0" />
 					{/if}
 					<span class="truncate font-light">{channel.name}</span>
 				</div>

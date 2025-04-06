@@ -59,7 +59,16 @@ pub struct ChannelResource {
     pub id: String,
     pub name: String,
     pub slug: String,
+    pub r#type: ChannelType,
     // category_tree: Vec<String>,
+}
+
+#[derive(Type, Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelType {
+    Chat,
+    Feed,
+    MultiMedia,
 }
 
 impl Node for ChannelResource {

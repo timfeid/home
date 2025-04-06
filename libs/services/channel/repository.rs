@@ -15,7 +15,7 @@ use crate::{
     DatabasePool,
 };
 
-use super::service::{ChannelResource, ListChannelArgs};
+use super::service::{ChannelResource, ChannelType, ListChannelArgs};
 
 pub(crate) struct ChannelRepository {
     connection: DatabasePool,
@@ -25,12 +25,21 @@ pub(crate) struct ChannelModel {
     pub(super) id: String,
     pub(super) name: String,
     pub(super) slug: String,
+    pub(super) r#type: ChannelType,
 }
+
 impl ChannelModel {
     pub fn new(name: String) -> Self {
         Self {
             id: name.to_lowercase(),
             slug: name.to_lowercase(),
+            r#type: if &name == "Gameday" {
+                ChannelType::Chat
+            } else if &name == "News" {
+                ChannelType::Feed
+            } else {
+                ChannelType::MultiMedia
+            },
             name,
         }
     }
@@ -46,6 +55,7 @@ impl Model<ChannelResource> for ChannelModel {
             name: self.name.clone(),
             id: self.id.clone(),
             slug: self.slug.clone(),
+            r#type: self.r#type.clone(),
         }
     }
 }
