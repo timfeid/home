@@ -4,6 +4,7 @@
 	import { onDestroy, onMount, setContext } from 'svelte';
 	import '../app.css';
 	import { user } from '$lib/user.svelte';
+	import * as Sidebar from '$lib/components/ui/sidebar';
 	let { children } = $props();
 
 	const channelList = new ChannelList();
@@ -20,4 +21,6 @@
 	});
 </script>
 
-{@render children()}
+<Sidebar.Provider>
+	{@render children()}
+</Sidebar.Provider>

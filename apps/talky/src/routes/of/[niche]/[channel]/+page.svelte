@@ -2,20 +2,16 @@
 	import { page } from '$app/state';
 	import Channel from '$lib/components/channel/channel.svelte';
 	import Niche from '$lib/components/niche/niche.svelte';
-	import ChannelsSidebar from '$lib/layout/channels-sidebar.svelte';
-	import Layout from '$lib/layout/layout.svelte';
+
+	// let { children } = $props();
 </script>
 
-<Layout>
-	<ChannelsSidebar />
-
-	{#key page.params.niche}
-		<Niche slug={page.params.niche}>
-			{#snippet withNiche({ niche })}
-				{#key page.params.channel}
-					<Channel {niche} slug={page.params.channel} />
-				{/key}
-			{/snippet}
-		</Niche>
-	{/key}
-</Layout>
+{#key page.params.niche}
+	<Niche slug={page.params.niche}>
+		{#snippet withNiche({ niche })}
+			{#key page.params.channel}
+				<Channel {niche} slug={page.params.channel} />
+			{/key}
+		{/snippet}
+	</Niche>
+{/key}
