@@ -6,6 +6,7 @@ use specta::Type;
 use sqlx::{query, query_as, types::time::PrimitiveDateTime};
 
 use crate::{
+    error::AppResult,
     pagination::{Cursor, Model, Node, PaginationArgs, WithPagination},
     repository::Repository,
     DatabasePool,
@@ -100,7 +101,7 @@ impl Display for MessageCursor {
 }
 
 impl Repository<MessageModel, ListMessageArgs> for MessageRepository {
-    async fn count(&self, args: &ListMessageArgs) -> Result<i32, sqlx::Error> {
+    async fn count(&self, args: &ListMessageArgs) -> AppResult<i32> {
         Ok(2)
     }
 
@@ -112,7 +113,7 @@ impl Repository<MessageModel, ListMessageArgs> for MessageRepository {
         )>,
         take: i32,
         args: &ListMessageArgs,
-    ) -> Result<Vec<MessageModel>, sqlx::Error> {
+    ) -> AppResult<Vec<MessageModel>> {
         let messages = query_as!(
             MessageModel,
             "select

@@ -15,6 +15,7 @@ serde_json.workspace = true
 ulid = "1.2.1"
 chrono = "0.4.40"
 slugify = "0.1.0"
+thiserror = "2.0.12"
 
 [lib]
 path = "lib.rs"

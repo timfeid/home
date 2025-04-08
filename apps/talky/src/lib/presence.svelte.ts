@@ -1,9 +1,26 @@
 import { getContext } from 'svelte';
 import { user } from './user.svelte.js';
 import type { Procedures } from '@feid/bindings';
+import { connectAudio, isTauri } from './tauri.js';
+import { page } from '$app/state';
 
 interface ClientInfoMsg {
 	id: string;
+	user_id: string;
+}
+
+export type ActiveChannels = {
+	type: 'active_channels';
+	channels: Record<string, RoomResource>;
+};
+
+export interface RoomResource {
+	type: string;
+	users: User[];
+}
+
+export interface User {
+	type: string;
 	user_id: string;
 }
 
@@ -23,7 +40,26 @@ export interface ChatMessage {
 	channel_id: string;
 }
 
-export type IncomingServerMessage = ActiveClientsMessage | ErrorMessage | ChatMessage;
+type OfferMessage = {
+	type: 'offer';
+	offer: string;
+	channel_id: string;
+};
+
+type CandidateMessage = {
+	type: 'candidate';
+	candidate: RTCIceCandidate;
+	channel_id: string;
+	niche_id: string;
+};
+
+export type IncomingServerMessage =
+	| ActiveClientsMessage
+	| ErrorMessage
+	| ChatMessage
+	| ActiveChannels
+	| CandidateMessage
+	| OfferMessage;
 
 const SOUNDHOUSE_URL = 'ws://localhost:8080/soundhouse';
 const MAX_RETRIES = 5;
@@ -52,20 +88,34 @@ class EventEmitter {
 
 export class Presence extends EventEmitter {
 	socket = $state<WebSocket | null>(null);
+	channelConnection = $state({
+		status: 'init',
+		id: ''
+	});
 
-	status = $state<'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed' | 'error'>('idle');
+	status = $state<
+		'idle' | 'connecting' | 'connected' | 'handshake' | 'reconnecting' | 'closed' | 'error'
+	>('idle');
 	error = $state<Event | Error | null>(null);
 	retryCount = $state(0);
 	private retryTimer = $state<ReturnType<typeof setTimeout> | null>(null);
 	private explicitlyClosed = $state(false);
 
+	peerConnection = $state<RTCPeerConnection | null>(null);
 	lastMessage = $state<IncomingServerMessage | null>(null);
+	currentNicheId = $state('');
 	activeClients = $state<ClientInfoMsg[]>([]);
+	activeChannels = $state<ActiveChannels['channels']>({});
 
-	isConnected = $derived(this.status === 'open');
+	isConnected = $derived(this.status === 'connected');
 	isTrying = $derived(this.status === 'connecting' || this.status === 'reconnecting');
 
+	connectedChannel = $derived(
+		this.channelConnection.status === 'connected' ? this.channelConnection : undefined
+	);
+
 	setup() {
+		$inspect(this.activeChannels);
 		$effect(() => {
 			const token = user.accessToken;
 
@@ -90,6 +140,27 @@ export class Presence extends EventEmitter {
 		});
 	}
 
+	async connected() {
+		console.log('joined channel, lets attempt to join voice now');
+		this.createPeerConnection();
+		if (isTauri && user.accessToken && this.connectedChannel) {
+			connectAudio(user.accessToken, this.connectedChannel.id, page.params.niche || 'devils');
+		}
+	}
+
+	joinChannel(channelId: string) {
+		this.channelConnection = {
+			status: 'init',
+			id: channelId
+		};
+
+		this.sendMessage({
+			type: 'join',
+			role: 'answerer',
+			channel_id: channelId
+		});
+	}
+
 	private attemptConnection(token: string | undefined): void {
 		if (!token) {
 			console.warn('[AttemptConnection] Aborted: No token provided.');
@@ -97,7 +168,12 @@ export class Presence extends EventEmitter {
 			return;
 		}
 
-		if (this.socket || this.status === 'open' || this.status === 'connecting') {
+		if (
+			this.socket ||
+			this.status === 'handshake' ||
+			this.status === 'connected' ||
+			this.status === 'connecting'
+		) {
 			console.warn(
 				`[AttemptConnection] Aborted: Already connected or attempting (Status: ${this.status}).`
 			);
@@ -149,7 +225,7 @@ export class Presence extends EventEmitter {
 			return;
 		}
 		console.log('[Presence] WebSocket connection established.');
-		this.status = 'open';
+		this.status = 'handshake';
 		this.retryCount = 0;
 		this.explicitlyClosed = false;
 		this.clearRetryTimer();
@@ -170,6 +246,164 @@ export class Presence extends EventEmitter {
 			this.explicitlyClosed = true;
 			ws.close(1011, 'Init send failed');
 		}
+
+		console.log('[Presence] Handshake complete');
+		this.status = 'connected';
+	}
+
+	private createPeerConnection() {
+		console.log('[WebRTC] Starting as answerer...');
+		this.peerConnection = new RTCPeerConnection({
+			iceServers: [
+				{
+					urls: [
+						'stun:server.loc:31899',
+						'turn:server.loc:30665?transport=udp',
+						'turn:server.loc:31953?transport=tcp'
+					],
+					username: 'coturn',
+					credential: 'password'
+				}
+			],
+			iceTransportPolicy: 'all'
+		});
+
+		this.peerConnection.onicecandidate = (event) => {
+			if (event.candidate && this.socket) {
+				console.log('[WebRTC] New ICE candidate:', event.candidate);
+				this.socket.send(
+					JSON.stringify({
+						type: 'candidate',
+						candidate: event.candidate,
+						channel_id: this.connectedChannel!.id,
+						niche_id: page.params.niche
+					})
+				);
+			}
+		};
+
+		// Add this to monitor connection state
+		this.peerConnection.onconnectionstatechange = () => {
+			console.log(`[WebRTC] Connection State: ${this.peerConnection?.connectionState}`);
+		};
+
+		// Add this to monitor soundhouse state
+		this.peerConnection.onsignalingstatechange = () => {
+			console.log(`[WebRTC] Signaling State: ${this.peerConnection?.signalingState}`);
+		};
+
+		// When remote media is received, attach it to the audio element.
+		this.peerConnection.ontrack = (event) => {
+			console.log('[WebRTC] Received remote track event:', event);
+			let stream: MediaStream;
+			if (event.streams && event.streams[0]) {
+				stream = event.streams[0];
+			} else {
+				stream = new MediaStream([event.track]);
+			}
+			console.log('[WebRTC] Received stream:', stream);
+			console.log('[WebRTC] Audio tracks in stream:', stream.getAudioTracks());
+
+			// Attach stream to the audio element.
+			console.log(stream);
+			const audioElement = document.createElement('audio');
+			document.body.appendChild(audioElement);
+			audioElement.srcObject = stream;
+			audioElement.volume = 1.0;
+			audioElement.muted = false; // ensure not muted
+
+			audioElement
+				.play()
+				.then(() => {
+					console.log('[WebRTC] Audio playback started successfully.');
+					// Use Web Audio API to analyze the stream.
+					const audioCtx = new AudioContext();
+					const source = audioCtx.createMediaStreamSource(stream);
+					const analyser = audioCtx.createAnalyser();
+
+					source.connect(analyser);
+					analyser.fftSize = 2048;
+					const bufferLength = analyser.frequencyBinCount;
+					const dataArray = new Uint8Array(bufferLength);
+					function draw() {
+						analyser.getByteFrequencyData(dataArray);
+						// Log average volume (or analyze the data in another way)
+						const avg = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+						console.log('[Audio Analyser] Average volume:', avg);
+						requestAnimationFrame(draw);
+					}
+					draw();
+				})
+				.catch((error) => {
+					console.error('[WebRTC] Error starting audio playback:', error);
+				});
+		};
+
+		// Set up the soundhouse channel.
+		// this.reportStats();
+		console.log('[WebRTC] Waiting for remote offer from the test client...');
+	}
+
+	reportStats() {
+		this.peerConnection!.getStats(null).then((stats) => {
+			const allStats = [];
+			stats.forEach((report) => {
+				allStats.push(report);
+			});
+			console.log(JSON.stringify(allStats));
+		});
+		setTimeout(this.reportStats.bind(this), 1000);
+	}
+
+	private candidate(message: CandidateMessage) {
+		console.log('[Signaling] Received ICE Candidate:', message.candidate);
+		if (!this.peerConnection) {
+			return;
+		}
+		try {
+			// Validate that candidate fields exist before constructing the RTCIceCandidate.
+			if (
+				message.candidate.candidate &&
+				message.candidate.sdpMid != null &&
+				message.candidate.sdpMLineIndex != null
+			) {
+				const iceCandidate = new RTCIceCandidate(message.candidate);
+				this.peerConnection.addIceCandidate(iceCandidate);
+				console.log('[WebRTC] Added ICE candidate successfully.');
+			} else {
+				console.error(
+					'[Signaling] Received candidate is missing required fields:',
+					message.candidate
+				);
+			}
+		} catch (error) {
+			console.error('[WebRTC] Error adding ICE candidate:', error);
+		}
+	}
+
+	private async offer(message: OfferMessage) {
+		console.log('[Signaling] Received offer SDP:', message.offer);
+		if (!this.peerConnection) {
+			return;
+		}
+		try {
+			const remoteDesc = new RTCSessionDescription({ type: 'offer', sdp: message.offer });
+			await this.peerConnection.setRemoteDescription(remoteDesc);
+			console.log('[WebRTC] Remote description set from offer.');
+			const answer = await this.peerConnection.createAnswer();
+			await this.peerConnection.setLocalDescription(answer);
+			console.log('[WebRTC] Created answer:', answer.sdp);
+			const answerMsg = {
+				type: 'answer',
+				answer: answer.sdp,
+				channel_id: this.connectedChannel!.id,
+				niche_id: page.params.niche
+			};
+			this.socket?.send(JSON.stringify(answerMsg));
+			console.log('[Signaling] Sent SDP answer:', answerMsg);
+		} catch (error) {
+			console.error('[Signaling] Error processing offer:', error);
+		}
 	}
 
 	private handleMessage(ws: WebSocket, event: MessageEvent): void {
@@ -180,6 +414,17 @@ export class Presence extends EventEmitter {
 			this.lastMessage = message;
 
 			switch (message.type) {
+				case 'active_channels':
+					this.activeChannels = message.channels;
+
+					this.emit('[Presence] Updated active channels', this.activeChannels);
+					break;
+				case 'candidate':
+					this.candidate(message);
+					break;
+				case 'offer':
+					this.offer(message);
+					break;
 				case 'active_clients_update':
 					this.activeClients = message.clients;
 					this.emit('activeClientsUpdated', this.activeClients);
@@ -345,7 +590,7 @@ export class Presence extends EventEmitter {
 	}
 
 	sendMessage(message: object): boolean {
-		if (!this.socket || this.status !== 'open') {
+		if (!this.socket || this.status !== 'connected') {
 			console.error(
 				`[Presence SendMessage] Cannot send message, WebSocket status is not 'open' (Status: ${this.status}).`
 			);

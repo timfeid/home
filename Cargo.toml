@@ -22,7 +22,6 @@ tokio = { version = "1.44.1", features = [
     "signal",
 ] }
 specta = { version = "=2.0.0-rc.22", default-features = false }
-rspc = { version = "0.4.1", features = ["typescript", "rust"] }
 sqlx = { version = "0.8.1", features = [
     "postgres",
     "runtime-tokio-rustls",

@@ -11,6 +11,7 @@ use specta::Type;
 use sqlx::{query, query_as};
 
 use crate::{
+    error::{AppResult, ServicesError},
     pagination::{Cursor, Model},
     repository::Repository,
     DatabasePool,
@@ -59,6 +60,7 @@ impl Model<ChannelResource> for ChannelModel {
         ChannelResource {
             name: self.name.clone(),
             id: self.id.clone(),
+            niche_id: self.niche_id.clone(),
             slug: self.slug.clone(),
             r#type: self.r#type.clone(),
             is_temporary: self.is_temporary.clone(),
@@ -71,14 +73,32 @@ impl ChannelRepository {
         Self { connection }
     }
 
-    pub async fn list_for_user(&self, user_id: &str) -> Result<Vec<ChannelModel>, sqlx::Error> {
+    pub async fn list_for_user(&self, user_id: &str) -> AppResult<Vec<ChannelModel>> {
         Ok(vec![
             ChannelModel::new("News".to_string()),
             ChannelModel::new("Gameday".to_string()),
         ])
     }
 
-    pub async fn find_by_slug(&self, slug: String) -> Result<ChannelModel, sqlx::Error> {
+    pub async fn find_by_id(&self, id: String) -> AppResult<ChannelModel> {
+        query_as!(
+            ChannelModel,
+            r#"select
+                id,
+                name,
+                slug,
+                type as "type: ChannelType",
+                niche_id,
+                is_temporary
+                from channels where id = $1"#,
+            id
+        )
+        .fetch_one(self.connection.as_ref())
+        .await
+        .map_err(ServicesError::from)
+    }
+
+    pub async fn find_by_slug(&self, slug: String) -> AppResult<ChannelModel> {
         let name = slug
             .chars()
             .enumerate()
@@ -93,7 +113,7 @@ impl ChannelRepository {
         Ok(ChannelModel::new(name))
     }
 
-    pub async fn create(&self, args: &CreateChannelArgs) -> Result<ChannelModel, sqlx::Error> {
+    pub async fn create(&self, args: &CreateChannelArgs) -> AppResult<ChannelModel> {
         let id = ulid::Ulid::new().to_string();
         let slug = slugify!(&args.name);
 
@@ -108,7 +128,7 @@ impl ChannelRepository {
                     args.niche_id,
                 )
                 .fetch_one(self.connection.as_ref())
-                .await
+                .await.map_err(ServicesError::from)
     }
 }
 
@@ -151,7 +171,7 @@ impl Display for ChannelCursor {
 }
 
 impl Repository<ChannelModel, ListChannelArgs> for ChannelRepository {
-    async fn count(&self, args: &ListChannelArgs) -> Result<i32, sqlx::Error> {
+    async fn count(&self, args: &ListChannelArgs) -> AppResult<i32> {
         let row = query!(
             r#"select
                 count(*) as count
@@ -172,7 +192,7 @@ impl Repository<ChannelModel, ListChannelArgs> for ChannelRepository {
         )>,
         take: i32,
         args: &ListChannelArgs,
-    ) -> Result<Vec<ChannelModel>, sqlx::Error> {
+    ) -> AppResult<Vec<ChannelModel>> {
         query_as!(
             ChannelModel,
             r#"select
@@ -187,5 +207,6 @@ impl Repository<ChannelModel, ListChannelArgs> for ChannelRepository {
         )
         .fetch_all(self.connection.as_ref())
         .await
+        .map_err(ServicesError::from)
     }
 }

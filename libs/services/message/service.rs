@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::{
+    error::AppResult,
     pagination::{
         connection_from_repository, Cursor, ListResult, Node, PaginationArgs, WithPagination,
     },
@@ -93,7 +94,7 @@ impl MessageService {
     pub async fn list(
         &self,
         args: ListMessageArgs,
-    ) -> Result<ListResult<MessageResource, ListMessageMeta>, sqlx::Error> {
+    ) -> AppResult<ListResult<MessageResource, ListMessageMeta>> {
         connection_from_repository(&args, self.repository.clone()).await
     }
 

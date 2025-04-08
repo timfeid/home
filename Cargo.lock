@@ -5805,6 +5805,7 @@ dependencies = [
  "specta",
  "sqlx",
  "talky-data",
+ "thiserror 2.0.12",
  "tokio",
  "ulid",
 ]

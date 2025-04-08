@@ -1,3 +1,4 @@
+use talky_services::error::ServicesError;
 use thiserror::Error;
 use warp::ws::Message;
 use warp::Error as WarpError;
@@ -28,6 +29,9 @@ pub enum AppError {
     #[error("Client disconnected unexpectedly")]
     ClientDisconnected,
 
+    #[error("Internal Server Error: {0}")]
+    InternalServerError(String),
+
     #[error("Initialization message error: {0}")]
     InitializationError(String),
 
@@ -36,6 +40,13 @@ pub enum AppError {
 }
 
 pub type AppResult<T> = Result<T, AppError>;
+
+impl From<ServicesError> for AppError {
+    fn from(value: ServicesError) -> Self {
+        eprintln!("Services Error: {:?}", value);
+        AppError::InternalServerError("Something went wrong.".to_string())
+    }
+}
 
 impl AppError {
     pub fn to_ws_close_message(&self) -> Message {

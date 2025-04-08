@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::{
+    error::AppResult,
     pagination::{Cursor, Model, Node, PaginationArgs, WithPagination},
     repository::Repository,
     DatabasePool,
@@ -50,7 +51,7 @@ impl NicheRepository {
         Self { connection }
     }
 
-    pub fn find_one(&self, slug: String) -> Result<NicheModel, sqlx::Error> {
+    pub fn find_one(&self, slug: String) -> AppResult<NicheModel> {
         let name = slug
             .chars()
             .enumerate()
@@ -106,7 +107,7 @@ impl Display for NicheCursor {
 }
 
 impl Repository<NicheModel, ListNicheArgs> for NicheRepository {
-    async fn count(&self, args: &ListNicheArgs) -> Result<i32, sqlx::Error> {
+    async fn count(&self, args: &ListNicheArgs) -> AppResult<i32> {
         Ok(2)
     }
 
@@ -118,7 +119,7 @@ impl Repository<NicheModel, ListNicheArgs> for NicheRepository {
         )>,
         take: i32,
         args: &ListNicheArgs,
-    ) -> Result<Vec<NicheModel>, sqlx::Error> {
+    ) -> AppResult<Vec<NicheModel>> {
         Ok(vec![NicheModel::new("Devils".to_string())])
     }
 }

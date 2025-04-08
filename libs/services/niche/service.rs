@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::{
+    error::AppResult,
     pagination::{
         connection_from_repository, Cursor, ListResult, Model, Node, PaginationArgs, WithPagination,
     },
@@ -72,7 +73,7 @@ impl NicheService {
     pub async fn list_for_user(
         &self,
         args: ListNicheArgs,
-    ) -> Result<ListResult<NicheResource, ListNicheMeta>, sqlx::Error> {
+    ) -> AppResult<ListResult<NicheResource, ListNicheMeta>> {
         connection_from_repository(&args, self.repository.clone()).await
     }
 
@@ -82,7 +83,7 @@ impl NicheService {
         }
     }
 
-    pub async fn find_by_slug(&self, slug: String) -> Result<NicheResource, sqlx::Error> {
+    pub async fn find_by_slug(&self, slug: String) -> AppResult<NicheResource> {
         Ok(self.repository.find_one(slug)?.to_node())
     }
 }

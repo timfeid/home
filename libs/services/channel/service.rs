@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::{
+    error::AppResult,
     pagination::{
         connection_from_repository, Cursor, ListResult, Model, Node, PaginationArgs, WithPagination,
     },
@@ -68,13 +69,14 @@ pub struct CreateChannelArgs {
     // pub expire_contract: Option<String>,
 }
 
-#[derive(Type, Serialize, Debug)]
+#[derive(Type, Serialize, Debug, Clone)]
 pub struct ChannelResource {
     pub id: String,
     pub name: String,
     pub slug: String,
     pub r#type: ChannelType,
     pub is_temporary: bool,
+    pub niche_id: String,
     // category_tree: Vec<String>,
 }
 
@@ -97,11 +99,11 @@ impl ChannelService {
     pub async fn list(
         &self,
         args: &ListChannelArgs,
-    ) -> Result<ListResult<ChannelResource, ListChannelMeta>, sqlx::Error> {
+    ) -> AppResult<ListResult<ChannelResource, ListChannelMeta>> {
         connection_from_repository(args, self.repository.clone()).await
     }
 
-    pub async fn list_for_user(&self, user_id: &str) -> Result<Vec<ChannelResource>, sqlx::Error> {
+    pub async fn list_for_user(&self, user_id: &str) -> AppResult<Vec<ChannelResource>> {
         Ok(self
             .repository
             .list_for_user(user_id)
@@ -117,12 +119,16 @@ impl ChannelService {
         }
     }
 
-    pub async fn create(&self, args: &CreateChannelArgs) -> Result<ChannelResource, sqlx::Error> {
+    pub async fn create(&self, args: &CreateChannelArgs) -> AppResult<ChannelResource> {
         Ok(self.repository.create(args).await?.to_node())
     }
 
-    pub async fn find_by_slug(&self, slug: String) -> Result<ChannelResource, sqlx::Error> {
+    pub async fn find_by_slug(&self, slug: String) -> AppResult<ChannelResource> {
         Ok(self.repository.find_by_slug(slug).await?.to_node())
+    }
+
+    pub async fn find_by_id(&self, id: String) -> AppResult<ChannelResource> {
+        Ok(self.repository.find_by_id(id).await?.to_node())
     }
 }
 

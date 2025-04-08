@@ -7,7 +7,10 @@ use std::{
     sync::Arc,
 };
 
-use crate::repository::{CursorDirection, Repository};
+use crate::{
+    error::AppResult,
+    repository::{CursorDirection, Repository},
+};
 
 #[derive(Type, Clone, Debug, Serialize, Deserialize, Default)]
 pub struct PageInfo {
@@ -69,7 +72,7 @@ pub trait WithPagination {
 pub async fn connection_from_repository<T, U, Pagination, R, M, CursorType>(
     args: &Pagination,
     repository: Arc<R>,
-) -> Result<ListResult<U, M>, sqlx::Error>
+) -> AppResult<ListResult<U, M>>
 where
     T: Model<U>,
     U: Node,

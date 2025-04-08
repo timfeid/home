@@ -1,17 +1,15 @@
 use anyhow::{Context, Result};
-use bytemuck::cast_slice;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{BufferSize, SampleRate, StreamConfig, SupportedStreamConfig};
+use cpal::{BufferSize, StreamConfig};
 use futures_util::{SinkExt, StreamExt};
 use opus::{Application, Channels, Encoder};
 use serde::{Deserialize, Serialize};
-
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Manager};
-use tauri_plugin_store::{StoreBuilder, StoreExt};
-use tokio::sync::{mpsc, Mutex};
+use tauri_plugin_store::StoreExt;
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tungstenite::Bytes;
 use webrtc::api::interceptor_registry::register_default_interceptors;
@@ -22,7 +20,6 @@ use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::interceptor::registry::Registry;
 use webrtc::media::Sample;
 use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
@@ -61,7 +58,6 @@ impl AudioProcessor {
             },
             Application::Voip,
         )?;
-
         Ok(Self {
             config,
             opus_encoder: Arc::new(Mutex::new(opus_encoder)),
@@ -83,6 +79,7 @@ impl AudioProcessor {
             CaptureMode::VoiceActivated => {
                 let rms = Self::calculate_rms(samples);
                 let db_level = Self::rms_to_decibels(rms);
+                println!("{}", db_level);
                 db_level > self.config.voice_activity_threshold
             }
             CaptureMode::Continuous => true,
@@ -91,24 +88,23 @@ impl AudioProcessor {
 
     pub async fn encode_samples(&self, samples: &[f32]) -> Result<Vec<u8>> {
         let frame: Vec<i16> = samples.iter().map(|&s| (s * 32767.0) as i16).collect();
-
         let mut opus_buffer = vec![0u8; 4000];
-
         let encoded_bytes = {
             let mut encoder = self.opus_encoder.lock().await;
             encoder
                 .encode(&frame, &mut opus_buffer)
                 .context("Opus encoding failed")?
         };
-
         Ok(opus_buffer[..encoded_bytes].to_vec())
     }
 }
 
-pub struct WebRTCManager {
-    peer_connection: Arc<RTCPeerConnection>,
-    audio_track: Arc<TrackLocalStaticSample>,
-    ws_sender: Arc<
+pub struct WebRTCAudio {
+    pub peer_connection: Arc<RTCPeerConnection>,
+    pub audio_track: Arc<TrackLocalStaticSample>,
+    pub audio_processor: Arc<AudioProcessor>,
+    pub capture_control: Arc<Mutex<CaptureControl>>,
+    pub ws_sender: Arc<
         Mutex<
             futures_util::stream::SplitSink<
                 tokio_tungstenite::WebSocketStream<
@@ -118,8 +114,11 @@ pub struct WebRTCManager {
             >,
         >,
     >,
-    audio_processor: Arc<AudioProcessor>,
-    capture_control: Arc<Mutex<CaptureControl>>,
+}
+
+pub struct WebRTCManager {
+    pub signaling_url: String,
+    pub audio: RwLock<Option<WebRTCAudio>>,
     pub cancellation_token: tokio_util::sync::CancellationToken,
 }
 
@@ -144,112 +143,85 @@ impl CaptureControl {
 }
 
 impl WebRTCManager {
-    pub async fn start_audio_capture(&self) -> Result<Arc<dyn cpal::traits::StreamTrait>> {
+    pub async fn start_audio_capture(&self) -> Result<cpal::Stream> {
         let host = cpal::default_host();
         let input_device = host
             .default_input_device()
             .context("No input device available")?;
-
         let supported_config = input_device.default_input_config()?;
 
-        let use_stereo = supported_config.channels() == 2;
-        let channels = if use_stereo { 2 } else { 1 };
-
         let stream_config = StreamConfig {
-            channels,
-            sample_rate: SampleRate(48000),
+            channels: supported_config.channels(),
+            sample_rate: supported_config.sample_rate(),
             buffer_size: BufferSize::Fixed(1024),
         };
 
         let (tx, mut rx) = mpsc::channel::<Vec<f32>>(100);
-        let audio_processor = Arc::clone(&self.audio_processor);
-        let audio_track = Arc::clone(&self.audio_track);
-        let capture_control = Arc::clone(&self.capture_control);
-        let cancellation_token = self.cancellation_token.clone();
 
-        tokio::spawn(async move {
-            println!("Audio processing task started");
-            let mut buffer: Vec<f32> = Vec::new();
+        if let Some(audio) = &*self.audio.read().await {
+            let audio_processor = audio.audio_processor.clone();
+            let audio_track = audio.audio_track.clone();
+            let capture_control = audio.capture_control.clone();
+            let cancellation_token = self.cancellation_token.clone();
 
-            let frame_size = match channels {
-                1 => 960,
-                2 => 1920,
-                _ => {
-                    eprintln!("Unsupported channel count");
-                    return;
-                }
-            };
+            tokio::spawn(async move {
+                let mut buffer = Vec::new();
+                let frame_size = match supported_config.channels() {
+                    1 => 960,
+                    2 => 1920,
+                    _ => return,
+                };
 
-            while let Some(chunk) = rx.recv().await {
-                if cancellation_token.is_cancelled() {
-                    println!("Cancellation token triggered");
-                    break;
-                }
+                loop {
+                    match tokio::time::timeout(Duration::from_secs(1), rx.recv()).await {
+                        Ok(Some(mut chunk)) => {
+                            buffer.append(&mut chunk);
+                            while buffer.len() >= frame_size {
+                                let frame = buffer.drain(0..frame_size).collect::<Vec<f32>>();
+                                let is_ptt_active =
+                                    capture_control.lock().await.is_push_to_talk_active();
 
-                buffer.extend_from_slice(&chunk);
-
-                while buffer.len() >= frame_size {
-                    let frame_f32: Vec<f32> = buffer.drain(..frame_size).collect();
-
-                    let capture_control_guard = capture_control.lock().await;
-                    let should_send = audio_processor.should_send_audio(
-                        &frame_f32,
-                        capture_control_guard.is_push_to_talk_active(),
-                    );
-
-                    if !should_send {
-                        continue;
-                    }
-
-                    let frame_i16: Vec<i16> = frame_f32
-                        .iter()
-                        .map(|&s| (s * 32767.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16)
-                        .collect();
-
-                    let mut opus_buffer = vec![0u8; 4000];
-                    let encoded_bytes = {
-                        let mut encoder = audio_processor.opus_encoder.lock().await;
-                        match encoder.encode(&frame_i16, &mut opus_buffer) {
-                            Ok(n) => n,
-                            Err(e) => {
-                                eprintln!("Opus encoding failed: {:?}", e);
-                                continue;
+                                if audio_processor.should_send_audio(&frame, is_ptt_active) {
+                                    if let Ok(encoded) =
+                                        audio_processor.encode_samples(&frame).await
+                                    {
+                                        let sample = Sample {
+                                            data: Bytes::from(encoded),
+                                            duration: Duration::from_millis(20),
+                                            timestamp: SystemTime::now(),
+                                            ..Default::default()
+                                        };
+                                        let _ = audio_track.write_sample(&sample).await;
+                                    }
+                                }
                             }
                         }
-                    };
-
-                    let sample = Sample {
-                        data: Bytes::copy_from_slice(&opus_buffer[..encoded_bytes]),
-                        timestamp: SystemTime::now(),
-                        duration: Duration::from_millis(20),
-                        packet_timestamp: 0,
-                        prev_dropped_packets: 0,
-                        prev_padding_packets: 0,
-                    };
-
-                    if let Err(e) = audio_track.write_sample(&sample).await {
-                        eprintln!("Error writing audio sample: {:?}", e);
+                        Ok(None) | Err(_) => {
+                            if cancellation_token.is_cancelled() {
+                                break;
+                            }
+                        }
                     }
                 }
-            }
-        });
+            });
 
-        let sender = tx.clone();
-        let stream = input_device.build_input_stream(
-            &stream_config,
-            move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                if let Err(e) = sender.try_send(data.to_vec()) {
-                    eprintln!("Audio channel is full, dropping samples: {:?}", e);
-                }
-            },
-            |err| eprintln!("Audio input stream error: {:?}", err),
-            None,
-        )?;
+            let tx_clone = tx.clone();
+            let stream = input_device.build_input_stream(
+                &stream_config,
+                move |data: &[f32], _| {
+                    let _ = tx_clone.try_send(data.to_vec());
+                },
+                move |err| {
+                    eprintln!("Stream error: {:?}", err);
+                },
+                None,
+            )?;
 
-        stream.play()?;
-        println!("Started audio capture");
-
-        Ok(Arc::new(stream))
+            stream.play()?;
+            Ok(stream)
+        } else {
+            Err(anyhow::anyhow!("No audio session initialized"))
+        }
     }
 
     pub async fn stop_audio_capture(&self) {
@@ -257,43 +229,46 @@ impl WebRTCManager {
     }
 
     pub async fn process_audio_samples(&self, samples: &[f32]) -> Result<()> {
-        let capture_control = self.capture_control.lock().await;
-        let should_send = self
-            .audio_processor
-            .should_send_audio(samples, capture_control.is_push_to_talk_active());
+        if let Some(audio) = &*self.audio.read().await {
+            let capture_control = audio.capture_control.lock().await;
+            let should_send = audio
+                .audio_processor
+                .should_send_audio(samples, capture_control.is_push_to_talk_active());
 
-        if !should_send {
+            if !should_send {
+                return Ok(());
+            }
+
+            let encoded_samples = audio.audio_processor.encode_samples(samples).await?;
+
+            let sample = Sample {
+                packet_timestamp: 0,
+                prev_padding_packets: 0,
+                prev_dropped_packets: 0,
+                data: Bytes::from(encoded_samples),
+                duration: Duration::from_millis(20),
+                timestamp: SystemTime::now(),
+            };
+
+            audio.audio_track.write_sample(&sample).await?;
+
             return Ok(());
         }
 
-        let encoded_samples = self.audio_processor.encode_samples(samples).await?;
+        Err(anyhow::anyhow!("not streaming yet"))
+    }
 
-        let sample = Sample {
-            packet_timestamp: 0,
-            prev_padding_packets: 0,
-            prev_dropped_packets: 0,
-            data: Bytes::from(encoded_samples),
-            duration: Duration::from_millis(20),
-            timestamp: SystemTime::now(),
-        };
-
-        self.audio_track.write_sample(&sample).await?;
-
+    pub async fn set_capture_mode(&self, _mode: CaptureMode) -> Result<()> {
         Ok(())
     }
 
-    pub async fn set_capture_mode(&self, mode: CaptureMode) -> Result<()> {
-        Ok(())
-    }
-
-    pub async fn new(
+    pub async fn start(
+        &self,
         config: AudioCaptureConfig,
-        signaling_url: &str,
-        join_code: String,
-    ) -> Result<Self> {
-        let cancellation_token = tokio_util::sync::CancellationToken::new();
-        let cancellation_token_clone = cancellation_token.clone();
-
+        auth_code: String,
+        channel_id: String,
+        niche_id: String,
+    ) -> Result<()> {
         let rtc_config = RTCConfiguration {
             ice_servers: vec![RTCIceServer {
                 urls: vec![
@@ -307,7 +282,6 @@ impl WebRTCManager {
             }],
             ..Default::default()
         };
-
         let mut media_engine = MediaEngine::default();
         media_engine
             .register_default_codecs()
@@ -328,7 +302,7 @@ impl WebRTCManager {
         );
 
         let (ws_stream, _) =
-            tokio::time::timeout(Duration::from_secs(10), connect_async(signaling_url))
+            tokio::time::timeout(Duration::from_secs(10), connect_async(&self.signaling_url))
                 .await
                 .context("WebSocket connection timeout")?
                 .context("Failed to connect to signaling server")?;
@@ -338,7 +312,7 @@ impl WebRTCManager {
 
         let init_msg = json!({
             "type": "init",
-            "auth_code": join_code.clone(),
+            "auth_code": auth_code.clone(),
         })
         .to_string();
         ws_sender
@@ -350,18 +324,22 @@ impl WebRTCManager {
 
         let ws_sender_clone = ws_sender.clone();
         {
-            let join_code_inner = join_code.clone();
+            let channel_id = channel_id.clone();
+            let niche_id = niche_id.clone();
             peer_connection.on_ice_candidate(Box::new(move |candidate| {
                 let ws_sender_inner = ws_sender_clone.clone();
-                let join_code = join_code_inner.clone();
+                let channel_id = channel_id.clone();
+                let niche_id = niche_id.clone();
                 Box::pin(async move {
-                    let join_code = join_code.clone();
+                    let channel_id = channel_id.clone();
                     if let Some(candidate) = candidate {
                         println!("New ICE candidate: {:?}", candidate);
                         if let Ok(candidate_json) = candidate.to_json() {
                             let msg = json!({
+                                "type": "candidate",
                                 "candidate": candidate_json,
-                                "join_code": &join_code
+                                "channel_id": &channel_id,
+                                "niche_id": &niche_id
                             })
                             .to_string();
                             if let Err(e) = ws_sender_inner
@@ -403,10 +381,11 @@ impl WebRTCManager {
 
         let pc_clone = Arc::clone(&peer_connection);
         let ws_sender_clone = ws_sender.clone();
+        let cancellation_token_clone = self.cancellation_token.clone();
 
-        let join_code_inner = join_code.clone();
+        let channel_id = channel_id.clone();
+        let _auth_code_inner = auth_code.clone();
         tokio::spawn(async move {
-            let join_code = join_code_inner.clone();
             println!("DEBUG: Starting WebSocket receiver loop");
 
             loop {
@@ -430,9 +409,9 @@ impl WebRTCManager {
                                                 println!("VERBOSE: Parsed JSON message: {:#?}", json_msg);
 
                                                 match json_msg.get("type").and_then(|t| t.as_str()) {
-                                                    Some("active_clients") => {
-                                                        println!("INFO: Received active_clients message.");
-                                                        if let Some(clients) = json_msg.get("clients").and_then(|v| v.as_array()) {
+                                                    Some("active_channels") => {
+                                                        println!("INFO: Received active_channels message.");
+                                                        if let Some(clients) = json_msg.get("channels").and_then(|v| v.as_array()) {
                                                             println!("DEBUG: Clients array: {:?}", clients);
                                                             if clients.iter().any(|c| c.get("role") == Some(&json!("answerer"))) {
                                                                 println!("INFO: Answerer detected, attempting to send offer...");
@@ -440,7 +419,6 @@ impl WebRTCManager {
                                                                     let offer_msg = json!({
                                                                         "type": "offer",
                                                                         "offer": local_desc.sdp,
-                                                                        "join_code": join_code.clone()
                                                                     })
                                                                     .to_string();
 
@@ -545,8 +523,10 @@ impl WebRTCManager {
 
         if let Some(local_desc) = peer_connection.local_description().await {
             let offer_msg = json!({
+                "type": "offer",
+                "niche_id": niche_id,
                 "offer": local_desc.sdp,
-                "join_code": &join_code
+                "channel_id": channel_id
             })
             .to_string();
 
@@ -558,12 +538,23 @@ impl WebRTCManager {
                 .context("Failed to send offer message")?;
         }
 
-        Ok(Self {
+        *self.audio.write().await = Some(WebRTCAudio {
             peer_connection,
             audio_track,
-            ws_sender,
             audio_processor,
             capture_control,
+            ws_sender,
+        });
+
+        Ok(())
+    }
+
+    pub async fn new(signaling_url: &str) -> Result<Self> {
+        let cancellation_token = tokio_util::sync::CancellationToken::new();
+
+        Ok(Self {
+            signaling_url: signaling_url.to_string(),
+            audio: RwLock::new(None),
             cancellation_token,
         })
     }
@@ -575,6 +566,49 @@ impl WebRTCManager {
 
         println!("WebRTCManager shutting down");
     }
+}
+
+#[tauri::command]
+async fn connect_audio(
+    auth_token: String,
+    channel_id: String,
+    niche_id: String,
+    state: tauri::State<'_, WebRTCManager>,
+) -> Result<(), tauri_plugin_store::Error> {
+    println!(
+        "[ConnectAudio] Starting with auth_token: {}, channel_id: {}, niche_id: {}",
+        auth_token, channel_id, niche_id
+    );
+
+    let config = AudioCaptureConfig {
+        sample_rate: 16000,
+        channels: 1,
+        buffer_size: 1024,
+        capture_mode: CaptureMode::VoiceActivated,
+        voice_activity_threshold: -40.0,
+    };
+
+    state
+        .start(config, auth_token, channel_id, niche_id)
+        .await
+        .map_err(|e| {
+            eprintln!("[ConnectAudio] Failed to start WebRTC session: {e}");
+            tauri_plugin_store::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))
+        })?;
+
+    let _stream = state.start_audio_capture().await.map_err(|e| {
+        eprintln!("[ConnectAudio] Failed to start audio capture: {e}");
+        tauri_plugin_store::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            e.to_string(),
+        ))
+    })?;
+
+    println!("[ConnectAudio] Audio capture and streaming started successfully");
+    Ok(())
 }
 
 #[tauri::command]
@@ -604,8 +638,8 @@ async fn get_refresh_token(app: AppHandle) -> Result<Option<Value>, tauri_plugin
 
 #[tauri::command]
 async fn configure_audio_capture(
-    config: AudioCaptureConfig,
-    state: tauri::State<'_, WebRTCManager>,
+    _config: AudioCaptureConfig,
+    _state: tauri::State<'_, WebRTCManager>,
 ) -> Result<(), String> {
     Ok(())
 }
@@ -615,11 +649,15 @@ async fn toggle_push_to_talk(
     active: bool,
     state: tauri::State<'_, WebRTCManager>,
 ) -> Result<(), String> {
-    let mut capture_control = state.capture_control.lock().await;
+    if let Some(audio) = &*state.audio.read().await {
+        let mut capture_control = audio.capture_control.lock().await;
 
-    capture_control.set_push_to_talk(active);
+        capture_control.set_push_to_talk(active);
 
-    println!("Push-to-talk {}activated", if active { "" } else { "de" });
+        println!("Push-to-talk {}activated", if active { "" } else { "de" });
+    } else {
+        println!("Not in channel yet?");
+    }
 
     Ok(())
 }
@@ -635,7 +673,8 @@ pub fn run(manager: WebRTCManager) {
             configure_audio_capture,
             toggle_push_to_talk,
             get_refresh_token,
-            set_refresh_token
+            set_refresh_token,
+            connect_audio,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

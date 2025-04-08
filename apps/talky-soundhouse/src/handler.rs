@@ -1,6 +1,6 @@
 use crate::error::{AppError, AppResult};
 use crate::message::{IncomingMessage, OutgoingMessage};
-use crate::state::{AppState, ClientInfo, ClientSender};
+use crate::state::{AppState, ClientInfo, ClientSender, UserResource};
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use std::sync::Arc;
 use talky_auth::JwtService;
@@ -82,9 +82,11 @@ async fn validate_initialization(
     let client_id = Ulid::new().to_string();
     let client_info = ClientInfo {
         id: client_id.clone(),
-        user_id: token_data.claims.sub,
-        role: "presence".to_string(),
+        resource: UserResource {
+            user_id: token_data.claims.sub,
+        },
         sender,
+        current_niche_id: None,
     };
 
     Ok((client_id, client_info))
@@ -110,7 +112,7 @@ async fn handle_client_error(sender: ClientSender, client_id: String, error: App
     tracing::error!("Failed to add client {} : {:?}", client_id, error);
 
     let err_msg = OutgoingMessage::Error {
-        message: format!("Failed to join room: {:?}", error),
+        message: format!("Failed to connect: {:?}", error),
     };
     let _ = sender
         .lock()
@@ -118,7 +120,7 @@ async fn handle_client_error(sender: ClientSender, client_id: String, error: App
         .send(
             err_msg
                 .to_ws_message()
-                .unwrap_or(Message::text("Error joining room")),
+                .unwrap_or(Message::text("Error connecting")),
         )
         .await;
     let _ = sender.lock().await.close().await;
@@ -208,6 +210,12 @@ async fn handle_text_message(text: &str, state: &AppState, client_id: &str) -> A
                         client_id
                     );
                 }
+                IncomingMessage::UpdateNiche { niche_id } => {
+                    state.update_niche(client_id, &niche_id).await?
+                }
+                IncomingMessage::Join { channel_id, role } => {
+                    state.join(client_id, channel_id, role).await?
+                }
                 IncomingMessage::ChatMessage {
                     content,
                     channel_id,
@@ -224,17 +232,38 @@ async fn handle_text_message(text: &str, state: &AppState, client_id: &str) -> A
                         .handle_webrtc_signal(client_id, &target_client_id, signal_data)
                         .await?;
                 }
+                IncomingMessage::Offer {
+                    offer,
+                    channel_id,
+                    niche_id,
+                } => {
+                    state.offer(client_id, offer, channel_id, niche_id).await?;
+                }
+                IncomingMessage::Candidate {
+                    candidate,
+                    channel_id,
+                    niche_id,
+                } => {
+                    state
+                        .candidate(client_id, candidate, channel_id, niche_id)
+                        .await?;
+                }
+                IncomingMessage::Answer {
+                    answer,
+                    channel_id,
+                    niche_id,
+                } => {
+                    state
+                        .answer(client_id, answer, channel_id, niche_id)
+                        .await?;
+                }
             }
             Ok(())
         }
         Err(e) => {
-            tracing::warn!(
-                "Failed to parse message from client {}: {}, message: '{}'",
-                client_id,
-                e,
-                text
-            );
+            tracing::info!("Passing message from {} along", client_id,);
             Err(AppError::Json(e))
+            // Ok(())
         }
     }
 }

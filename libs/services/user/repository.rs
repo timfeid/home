@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::{
+    error::AppResult,
     pagination::{Cursor, Model, Node, PaginationArgs, WithPagination},
     repository::Repository,
     DatabasePool,
@@ -97,7 +98,7 @@ impl Display for UserCursor {
 }
 
 impl Repository<UserModel, ListUserArgs> for UserRepository {
-    async fn count(&self, args: &ListUserArgs) -> Result<i32, sqlx::Error> {
+    async fn count(&self, args: &ListUserArgs) -> AppResult<i32> {
         Ok(2)
     }
 
@@ -109,7 +110,7 @@ impl Repository<UserModel, ListUserArgs> for UserRepository {
         )>,
         take: i32,
         args: &ListUserArgs,
-    ) -> Result<Vec<UserModel>, sqlx::Error> {
+    ) -> AppResult<Vec<UserModel>> {
         Ok(vec![
             UserModel::new("dazed".to_string(), "dazed".to_string()),
             UserModel::new("jimbo".to_string(), "jimbo".to_string()),

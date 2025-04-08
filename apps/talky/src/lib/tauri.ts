@@ -16,6 +16,12 @@ export async function saveRefreshTokenTauri(token: string) {
 	return response;
 }
 
+export async function connectAudio(authToken: string, channelId: string, nicheId: string) {
+	const response = await invoke('connect_audio', { authToken, channelId, nicheId });
+
+	return response;
+}
+
 export async function getAccessTokenWithTauri() {
 	try {
 		const refreshToken = await getRefreshTokenFromTauri();

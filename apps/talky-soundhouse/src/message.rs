@@ -1,12 +1,41 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{map::Values, Value};
 use talky_services::message::service::MessageResource;
+
+use crate::state::{RoomClientInfo, RoomResource};
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IncomingMessage {
     Init {
         auth_code: String,
+    },
+    UpdateNiche {
+        niche_id: String,
+    },
+    Join {
+        channel_id: String,
+        role: String,
+    },
+    Candidate {
+        candidate: Value,
+        channel_id: String,
+        // todo remove this
+        niche_id: String,
+    },
+    Answer {
+        answer: String,
+        channel_id: String,
+        // todo remove this
+        niche_id: String,
+    },
+    Offer {
+        offer: String,
+        channel_id: String,
+        // todo remove this
+        niche_id: String,
     },
     ChatMessage {
         content: String,
@@ -21,6 +50,22 @@ pub enum IncomingMessage {
 #[derive(Serialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutgoingMessage {
+    ActiveChannels {
+        channels: HashMap<String, RoomResource>,
+    },
+
+    Candidate {
+        candidate: Value,
+    },
+
+    Answer {
+        answer: String,
+    },
+
+    Offer {
+        offer: String,
+    },
+
     ActiveClientsUpdate {
         clients: Vec<ClientInfoMsg>,
     },

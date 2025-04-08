@@ -1,26 +1,52 @@
 <script lang="ts">
-	import { Avatar, AvatarFallback, AvatarImage } from '$lib/components/ui/avatar';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { page } from '$app/state';
-	import { Button } from '$lib/components/ui/button';
-	import { cn } from '$lib/utils';
-	import { AudioLines, ChevronDown, ChevronUp, Hash, MessageSquare, Plus } from 'lucide-svelte';
-	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
-	import { user } from '$lib/user.svelte';
-	import type { Niche } from './niche.svelte';
-	import type { PageInfo, Procedures } from '@feid/bindings';
 	import { client, wrapResponse } from '$lib/client';
+	import { Avatar, AvatarFallback } from '$lib/components/ui/avatar';
+	import { Button } from '$lib/components/ui/button';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
+	import { withPresence } from '$lib/presence.svelte';
+	import { user } from '$lib/user.svelte';
+	import { cn } from '$lib/utils';
+	import type { PageInfo, Procedures } from '@feid/bindings';
+	import { AudioLines, ChevronDown, ChevronUp, Hash, MessageSquare, Plus } from 'lucide-svelte';
+	import Badge from '../ui/badge/badge.svelte';
+	import type { Niche } from './niche.svelte';
 
 	let { niche }: { niche: Niche } = $props();
 	let channels = $state<Procedures['channel_list']['output']['edges'][number]['node'][]>([]);
 	let channelsSlug = $state('');
 
 	let pageInfo: PageInfo | undefined = $state();
+	const presence = withPresence();
 
-	let currentChannel = $state('');
-	function joinChannel(slug: string) {
-		currentChannel = slug;
+	async function joinChannel(channelId: string) {
+		if (!user.user) {
+			return;
+		}
+
+		presence.joinChannel(channelId);
 	}
+
+	$effect(() => {
+		if (presence.isConnected && presence.currentNicheId !== niche.id) {
+			presence.sendMessage({ type: 'update_niche', niche_id: niche.id });
+			presence.currentNicheId = niche.id;
+		}
+	});
+
+	$effect(() => {
+		let channel =
+			presence.channelConnection.id && presence.activeChannels[presence.channelConnection.id];
+		if (
+			channel &&
+			presence.channelConnection.status === 'init' &&
+			channel.users.some((cu) => cu.user_id === user.user!.sub)
+		) {
+			presence.channelConnection.status = 'connected';
+			presence.connected();
+		}
+	});
 
 	let creatingTemporaryChannelName = $state('');
 	async function createTemporaryChannel() {
@@ -111,7 +137,7 @@
 					{/if}
 					{#each temporaryChannels as channel}
 						<Sidebar.MenuItem>
-							<Sidebar.MenuButton onclick={() => joinChannel(channel)}>
+							<Sidebar.MenuButton onclick={() => joinChannel(channel.id)}>
 								<div class="flex flex-1 items-center overflow-hidden">
 									{#if channel.type === 'chat'}
 										<MessageSquare class="mr-1.5 h-4 w-4 flex-shrink-0" />
@@ -123,17 +149,42 @@
 									<span class="truncate font-light">{channel.name}</span>
 								</div>
 							</Sidebar.MenuButton>
-							{#if currentChannel === channel}
+							{@const room = presence.activeChannels[channel.id]}
+							{#if room}
+								<Sidebar.MenuSub>
+									{#each room.users as u}
+										<Sidebar.MenuSubItem>
+											<Sidebar.MenuSubButton class="h-auto py-1">
+												<Avatar class="mr-2 h-6 w-6">
+													<!-- <AvatarImage src={user.user!.avatar_url} alt={user.user!.username} /> -->
+													<AvatarFallback class="bg-teal-900 text-xs text-zinc-300">
+														{u.user_id.substring(0, 1).toUpperCase()}
+													</AvatarFallback>
+												</Avatar>
+												<div class="mr-auto">
+													{u.user_id}
+												</div>
+											</Sidebar.MenuSubButton>
+										</Sidebar.MenuSubItem>
+									{/each}
+								</Sidebar.MenuSub>
+							{/if}
+							{#if presence.channelConnection.id === channel.id && presence.channelConnection.status !== 'connected'}
 								<Sidebar.MenuSub>
 									<Sidebar.MenuSubItem>
-										<Sidebar.MenuSubButton class="h-auto py-1">
+										<Sidebar.MenuSubButton class="h-auto py-1 opacity-20">
 											<Avatar class="mr-2 h-6 w-6">
 												<!-- <AvatarImage src={user.user!.avatar_url} alt={user.user!.username} /> -->
 												<AvatarFallback class="bg-teal-900 text-xs text-zinc-300">
 													{user.user!.sub.substring(0, 1).toUpperCase()}
 												</AvatarFallback>
 											</Avatar>
-											{user.user!.sub}
+											<div class="mr-auto">
+												{user.user!.sub}
+											</div>
+											<Badge variant="outline" class="border-yellow-500 px-1.5 py-0 uppercase">
+												{presence.channelConnection.status}
+											</Badge>
 										</Sidebar.MenuSubButton>
 									</Sidebar.MenuSubItem>
 								</Sidebar.MenuSub>
