@@ -21,6 +21,22 @@ pub struct RoomClientInfo {
     pub role: String,
 }
 
+impl RoomClientInfo {
+    pub fn get_resource(&self) -> UserRoomResource {
+        UserRoomResource {
+            user: self.client.resource.clone(),
+            role: self.role.clone(),
+        }
+    }
+}
+
+#[derive(Serialize, Debug, Clone, Hash, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub struct UserRoomResource {
+    pub user: UserResource,
+    pub role: String,
+}
+
 #[derive(Serialize, Debug, Clone, Hash, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub struct UserResource {
@@ -54,7 +70,7 @@ impl ClientInfo {
 #[derive(Serialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub struct RoomResource {
-    users: HashSet<UserResource>,
+    users: HashSet<UserRoomResource>,
 }
 impl RoomResource {
     async fn generate_active_channels_message(rooms: &HashMap<String, Room>) -> OutgoingMessage {
@@ -92,13 +108,7 @@ impl Room {
 
     pub async fn to_resource(&self) -> RoomResource {
         RoomResource {
-            users: HashSet::from_iter(
-                self.clients
-                    .lock()
-                    .await
-                    .values()
-                    .map(|v| v.client.resource.clone()),
-            ),
+            users: HashSet::from_iter(self.clients.lock().await.values().map(|v| v.get_resource())),
         }
     }
 
@@ -369,20 +379,22 @@ impl AppState {
         };
 
         // Collect relevant clients without holding the lock
-        let clients: Vec<ClientSender> = {
+        let clients: Vec<(ClientSender, String)> = {
             self.clients
                 .lock()
                 .await
                 .values()
                 .filter(|&client| filter(client))
-                .map(|client| client.sender.clone())
+                .map(|client| (client.sender.clone(), client.id.clone()))
                 .collect()
         };
 
-        for sender in clients.iter() {
+        for (sender, client_id) in clients.iter() {
             let mut sender_lock = sender.lock().await;
             if let Err(e) = sender_lock.send(ws_message.clone()).await {
                 tracing::warn!("Failed to send broadcast message: {}", e);
+            } else {
+                tracing::info!("Sent message {:?} to client {}.", message, client_id);
             }
         }
     }

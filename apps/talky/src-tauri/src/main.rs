@@ -18,16 +18,7 @@ fn default_audio_config() -> AudioCaptureConfig {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let host = cpal::default_host();
-    let input_device = host
-        .default_input_device()
-        .context("No input device available")?;
-
-    let webrtc_manager = WebRTCManager::new("ws://localhost:8080/soundhouse")
-        .await
-        .expect("Failed to initialize WebRTC");
-
-    run(webrtc_manager);
+    run();
 
     Ok(())
 }

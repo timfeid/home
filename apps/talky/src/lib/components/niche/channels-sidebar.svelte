@@ -41,7 +41,7 @@
 		if (
 			channel &&
 			presence.channelConnection.status === 'init' &&
-			channel.users.some((cu) => cu.user_id === user.user!.sub)
+			channel.users.some((cu) => cu.user.user_id === user.user!.sub)
 		) {
 			presence.channelConnection.status = 'connected';
 			presence.connected();
@@ -158,11 +158,11 @@
 												<Avatar class="mr-2 h-6 w-6">
 													<!-- <AvatarImage src={user.user!.avatar_url} alt={user.user!.username} /> -->
 													<AvatarFallback class="bg-teal-900 text-xs text-zinc-300">
-														{u.user_id.substring(0, 1).toUpperCase()}
+														{u.user.user_id.substring(0, 1).toUpperCase()}
 													</AvatarFallback>
 												</Avatar>
 												<div class="mr-auto">
-													{u.user_id}
+													{u.user.user_id}
 												</div>
 											</Sidebar.MenuSubButton>
 										</Sidebar.MenuSubItem>

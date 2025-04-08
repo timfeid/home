@@ -5,7 +5,9 @@ use futures_util::{SinkExt, StreamExt};
 use opus::{Application, Channels, Encoder};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::cell::RefCell;
 use std::sync::Arc;
+use std::thread_local;
 use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
@@ -25,6 +27,10 @@ use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 use webrtc::track::track_local::TrackLocal;
+
+thread_local! {
+    static AUDIO_STREAM: RefCell<Option<cpal::Stream>> = RefCell::new(None);
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioCaptureConfig {
@@ -120,6 +126,7 @@ pub struct WebRTCManager {
     pub signaling_url: String,
     pub audio: RwLock<Option<WebRTCAudio>>,
     pub cancellation_token: tokio_util::sync::CancellationToken,
+    pub audio_capture_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 pub struct CaptureControl {
@@ -143,7 +150,7 @@ impl CaptureControl {
 }
 
 impl WebRTCManager {
-    pub async fn start_audio_capture(&self) -> Result<cpal::Stream> {
+    pub async fn start_audio_capture(self: Arc<Self>) -> Result<()> {
         println!("[AudioCapture] Initializing input stream...");
 
         let host = cpal::default_host();
@@ -171,62 +178,51 @@ impl WebRTCManager {
             let audio_track = audio.audio_track.clone();
             let capture_control = audio.capture_control.clone();
             let cancellation_token = self.cancellation_token.clone();
+            let audio_capture_task = self.audio_capture_task.clone();
 
-            tokio::spawn(async move {
-                println!("[AudioTask] Started");
+            let manager_clone = self.clone();
+            let task_handle = tokio::spawn(async move {
                 let mut buffer = Vec::new();
                 let frame_size = match supported_config.channels() {
                     1 => 960,
                     2 => 1920,
                     _ => return,
                 };
+                while let Some(mut chunk) = rx.recv().await {
+                    buffer.append(&mut chunk);
+                    while buffer.len() >= frame_size {
+                        let frame = buffer.drain(0..frame_size).collect::<Vec<f32>>();
+                        let is_ptt_active = capture_control.lock().await.is_push_to_talk_active();
 
-                loop {
-                    match tokio::time::timeout(Duration::from_secs(1), rx.recv()).await {
-                        Ok(Some(mut chunk)) => {
-                            println!("[AudioTask] Received {} samples", chunk.len());
-                            buffer.append(&mut chunk);
-                            while buffer.len() >= frame_size {
-                                let frame = buffer.drain(0..frame_size).collect::<Vec<f32>>();
-                                let is_ptt_active =
-                                    capture_control.lock().await.is_push_to_talk_active();
-                                if audio_processor.should_send_audio(&frame, is_ptt_active) {
-                                    if let Ok(encoded) =
-                                        audio_processor.encode_samples(&frame).await
-                                    {
-                                        let sample = Sample {
-                                            data: Bytes::from(encoded),
-                                            duration: Duration::from_millis(20),
-                                            timestamp: SystemTime::now(),
-                                            ..Default::default()
-                                        };
-                                        let _ = audio_track.write_sample(&sample).await;
-                                    }
-                                }
-                            }
-                        }
-                        Ok(None) => {
-                            println!("[AudioTask] Channel closed");
-                            break;
-                        }
-                        Err(_) => {
-                            if cancellation_token.is_cancelled() {
-                                println!("[AudioTask] Cancelled");
-                                break;
+                        if audio_processor.should_send_audio(&frame, is_ptt_active) {
+                            if let Ok(encoded) = audio_processor.encode_samples(&frame).await {
+                                let sample = Sample {
+                                    data: Bytes::from(encoded),
+                                    duration: Duration::from_millis(20),
+                                    timestamp: SystemTime::now(),
+                                    ..Default::default()
+                                };
+                                let _ = audio_track.write_sample(&sample).await;
                             }
                         }
                     }
+                    // if let Err(e) = manager_clone.process_audio_samples(&samples).await {
+                    //     eprintln!("[AudioStream] Error processing audio samples: {:?}", e);
+                    // }
                 }
 
-                println!("[AudioTask] Ended");
+                println!("[AudioStream] Receiver loop exited");
             });
 
-            let tx_clone = tx.clone();
+            *audio_capture_task.lock().await = Some(task_handle);
+
             let stream = input_device.build_input_stream(
                 &stream_config,
                 move |data: &[f32], _| {
                     println!("[AudioStream] Callback with {} samples", data.len());
-                    let _ = tx_clone.try_send(data.to_vec());
+                    if let Err(e) = tx.try_send(data.to_vec()) {
+                        eprintln!("[AudioStream] Failed to send audio data: {:?}", e);
+                    }
                 },
                 move |err| {
                     eprintln!("[AudioStream] Stream error: {:?}", err);
@@ -235,17 +231,31 @@ impl WebRTCManager {
             )?;
 
             stream.play()?;
+
+            AUDIO_STREAM.with(|cell| {
+                *cell.borrow_mut() = Some(stream);
+            });
+
             println!("[AudioCapture] Stream started");
-            Ok(stream)
+            Ok(())
         } else {
             Err(anyhow::anyhow!("No audio session initialized"))
         }
     }
+
     pub async fn stop_audio_capture(&self) {
         self.cancellation_token.cancel();
+        if let Some(handle) = self.audio_capture_task.lock().await.take() {
+            handle.await.ok();
+        }
+
+        AUDIO_STREAM.with(|cell| {
+            *cell.borrow_mut() = None;
+        });
     }
 
     pub async fn process_audio_samples(&self, samples: &[f32]) -> Result<()> {
+        println!("samples received");
         if let Some(audio) = &*self.audio.read().await {
             let capture_control = audio.capture_control.lock().await;
             let should_send = audio
@@ -339,13 +349,27 @@ impl WebRTCManager {
             .await
             .context("Failed to send init message")?;
 
+        let msg = json!({
+            "type": "join",
+            "channel_id": &channel_id,
+            "role": "offerer"
+        })
+        .to_string();
+
+        ws_sender
+            .lock()
+            .await
+            .send(Message::Text(msg.into()))
+            .await
+            .context("Failed to send join message")?;
+
         let ws_sender_clone = ws_sender.clone();
         {
-            let channel_id = channel_id.clone();
+            let channel_id_inner = channel_id.clone();
             let niche_id = niche_id.clone();
             peer_connection.on_ice_candidate(Box::new(move |candidate| {
                 let ws_sender_inner = ws_sender_clone.clone();
-                let channel_id = channel_id.clone();
+                let channel_id = channel_id_inner.clone();
                 let niche_id = niche_id.clone();
                 Box::pin(async move {
                     let channel_id = channel_id.clone();
@@ -400,9 +424,12 @@ impl WebRTCManager {
         let ws_sender_clone = ws_sender.clone();
         let cancellation_token_clone = self.cancellation_token.clone();
 
-        let channel_id = channel_id.clone();
+        let channel_id_inner = channel_id.clone();
+        let niche_id_inner = niche_id.clone();
         let _auth_code_inner = auth_code.clone();
         tokio::spawn(async move {
+            let channel_id = channel_id_inner.clone();
+            let niche_id = niche_id_inner.clone();
             println!("DEBUG: Starting WebSocket receiver loop");
 
             loop {
@@ -428,30 +455,43 @@ impl WebRTCManager {
                                                 match json_msg.get("type").and_then(|t| t.as_str()) {
                                                     Some("active_channels") => {
                                                         println!("INFO: Received active_channels message.");
-                                                        if let Some(clients) = json_msg.get("channels").and_then(|v| v.as_array()) {
-                                                            println!("DEBUG: Clients array: {:?}", clients);
-                                                            if clients.iter().any(|c| c.get("role") == Some(&json!("answerer"))) {
-                                                                println!("INFO: Answerer detected, attempting to send offer...");
-                                                                if let Some(local_desc) = pc_clone.local_description().await {
-                                                                    let offer_msg = json!({
-                                                                        "type": "offer",
-                                                                        "offer": local_desc.sdp,
-                                                                    })
-                                                                    .to_string();
+                                                        if let Some(channels) = json_msg.get("channels").and_then(|v| v.as_object()) {
+                                                            println!("DEBUG: Channels object: {:?}", channels);
+                                                            if let Some(channel) = channels.get(&channel_id) {
+                                                                if let Some(users) = channel.get("users").and_then(|v| v.as_array()) {
+                                                                    println!("DEBUG: Users array: {:?}", users);
+                                                                    if users.iter().any(|u| u.get("role") == Some(&json!("answerer"))) {
+                                                                        println!("INFO: Answerer detected, attempting to send offer...");
+                                                                        if let Some(local_desc) = pc_clone.local_description().await {
+                                                                            let offer_msg = json!({
+                                                                                "type": "offer",
+                                                                                "offer": local_desc.sdp,
 
-                                                                    println!("DEBUG: Offer message: {}", offer_msg);
-                                                                    match ws_sender_clone.lock().await.send(Message::Text(offer_msg.into())).await {
-                                                                        Ok(_) => println!("INFO: Offer sent successfully"),
-                                                                        Err(e) => eprintln!("ERROR: Failed to send offer: {:?}", e),
+                                                                                "niche_id": &niche_id,
+                                                                                "channel_id": &channel_id,
+
+                                                                            })
+                                                                            .to_string();
+
+                                                                            println!("DEBUG: Offer message: {}", offer_msg);
+                                                                            match ws_sender_clone.lock().await.send(Message::Text(offer_msg.into())).await {
+                                                                                Ok(_) => println!("INFO: Offer sent successfully"),
+                                                                                Err(e) => eprintln!("ERROR: Failed to send offer: {:?}", e),
+                                                                            }
+                                                                        } else {
+                                                                            println!("WARNING: No local description available");
+                                                                        }
+                                                                    } else {
+                                                                        println!("DEBUG: No answerer found in users");
                                                                     }
                                                                 } else {
-                                                                    println!("WARNING: No local description available");
+                                                                    println!("WARNING: No users array in channel");
                                                                 }
                                                             } else {
-                                                                println!("DEBUG: No answerer found in clients");
+                                                                println!("WARNING: Channel ID not found in channels");
                                                             }
                                                         } else {
-                                                            println!("WARNING: No clients array in message");
+                                                            println!("WARNING: No channels object in message");
                                                         }
                                                     }
                                                     Some("answer") => {
@@ -541,9 +581,9 @@ impl WebRTCManager {
         if let Some(local_desc) = peer_connection.local_description().await {
             let offer_msg = json!({
                 "type": "offer",
-                "niche_id": niche_id,
-                "offer": local_desc.sdp,
-                "channel_id": channel_id
+                "niche_id": &niche_id,
+                "offer": &local_desc.sdp,
+                "channel_id": channel_id.clone()
             })
             .to_string();
 
@@ -565,21 +605,28 @@ impl WebRTCManager {
 
         Ok(())
     }
-
     pub async fn new(signaling_url: &str) -> Result<Self> {
         let cancellation_token = tokio_util::sync::CancellationToken::new();
+        let audio_capture_task = Arc::new(Mutex::new(None));
 
         Ok(Self {
             signaling_url: signaling_url.to_string(),
             audio: RwLock::new(None),
             cancellation_token,
+            audio_capture_task,
         })
     }
 
-    pub async fn stop(&self) {}
-
     pub async fn shutdown(&self) {
         self.cancellation_token.cancel();
+
+        AUDIO_STREAM.with(|cell| {
+            *cell.borrow_mut() = None;
+        });
+
+        if let Some(handle) = self.audio_capture_task.lock().await.take() {
+            handle.await.ok();
+        }
 
         println!("WebRTCManager shutting down");
     }
@@ -590,47 +637,43 @@ async fn connect_audio(
     auth_token: String,
     channel_id: String,
     niche_id: String,
-    state: tauri::State<'_, WebRTCManager>,
-) -> Result<(), tauri_plugin_store::Error> {
+    state: tauri::State<'_, Arc<WebRTCManager>>,
+) -> Result<(), String> {
     println!(
         "[ConnectAudio] Starting with auth_token: {}, channel_id: {}, niche_id: {}",
         auth_token, channel_id, niche_id
     );
 
     let config = AudioCaptureConfig {
-        sample_rate: 16000,
-        channels: 1,
+        sample_rate: 48000,
+        channels: 2,
         buffer_size: 1024,
         capture_mode: CaptureMode::VoiceActivated,
         voice_activity_threshold: -40.0,
     };
 
-    state
-        .start(config, auth_token, channel_id, niche_id)
-        .await
-        .map_err(|e| {
+    let state_clone = state.inner().clone();
+
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = state_clone
+            .start(config, auth_token, channel_id.clone(), niche_id.clone())
+            .await
+        {
             eprintln!("[ConnectAudio] Failed to start WebRTC session: {e}");
-            tauri_plugin_store::Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            ))
-        })?;
+            return;
+        }
 
-    let _stream = state.start_audio_capture().await.map_err(|e| {
-        eprintln!("[ConnectAudio] Failed to start audio capture: {e}");
-        tauri_plugin_store::Error::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        ))
-    })?;
+        if let Err(e) = state_clone.start_audio_capture().await {
+            eprintln!("[ConnectAudio] Failed to start audio capture: {e}");
+        }
+    });
 
-    println!("[ConnectAudio] Audio capture and streaming started successfully");
+    println!("[ConnectAudio] Audio capture request initiated");
     Ok(())
 }
 
 #[tauri::command]
 async fn set_refresh_token(app: AppHandle, token: String) -> Result<(), tauri_plugin_store::Error> {
-    // Define the path for the store (adjust as needed)
     let path = app
         .path()
         .app_data_dir()
@@ -679,13 +722,26 @@ async fn toggle_push_to_talk(
     Ok(())
 }
 
-pub fn run(manager: WebRTCManager) {
+pub fn run() {
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+
+    let signaling_url = "ws://localhost:8080/soundhouse".to_string();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let manager = rt
+            .block_on(WebRTCManager::new(&signaling_url))
+            .expect("Failed to create WebRTCManager");
+        tx.send(manager).expect("Failed to send WebRTCManager");
+    });
+
+    let manager = rx.recv().expect("Failed to receive WebRTCManager");
+    let manager = Arc::new(manager);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
-        .setup(|app| {
-            app.handle().manage(manager);
-            Ok(())
-        })
+        .manage(manager)
         .invoke_handler(tauri::generate_handler![
             configure_audio_capture,
             toggle_push_to_talk,

@@ -21,7 +21,9 @@ export interface RoomResource {
 
 export interface User {
 	type: string;
-	user_id: string;
+	user: {
+		user_id: string;
+	};
 }
 
 interface ActiveClientsMessage {
