@@ -144,11 +144,19 @@ impl CaptureControl {
 
 impl WebRTCManager {
     pub async fn start_audio_capture(&self) -> Result<cpal::Stream> {
+        println!("[AudioCapture] Initializing input stream...");
+
         let host = cpal::default_host();
         let input_device = host
             .default_input_device()
             .context("No input device available")?;
+        println!(
+            "[AudioCapture] Using input device: {}",
+            input_device.name()?
+        );
+
         let supported_config = input_device.default_input_config()?;
+        println!("[AudioCapture] Supported config: {:?}", supported_config);
 
         let stream_config = StreamConfig {
             channels: supported_config.channels(),
@@ -165,6 +173,7 @@ impl WebRTCManager {
             let cancellation_token = self.cancellation_token.clone();
 
             tokio::spawn(async move {
+                println!("[AudioTask] Started");
                 let mut buffer = Vec::new();
                 let frame_size = match supported_config.channels() {
                     1 => 960,
@@ -175,12 +184,12 @@ impl WebRTCManager {
                 loop {
                     match tokio::time::timeout(Duration::from_secs(1), rx.recv()).await {
                         Ok(Some(mut chunk)) => {
+                            println!("[AudioTask] Received {} samples", chunk.len());
                             buffer.append(&mut chunk);
                             while buffer.len() >= frame_size {
                                 let frame = buffer.drain(0..frame_size).collect::<Vec<f32>>();
                                 let is_ptt_active =
                                     capture_control.lock().await.is_push_to_talk_active();
-
                                 if audio_processor.should_send_audio(&frame, is_ptt_active) {
                                     if let Ok(encoded) =
                                         audio_processor.encode_samples(&frame).await
@@ -196,34 +205,42 @@ impl WebRTCManager {
                                 }
                             }
                         }
-                        Ok(None) | Err(_) => {
+                        Ok(None) => {
+                            println!("[AudioTask] Channel closed");
+                            break;
+                        }
+                        Err(_) => {
                             if cancellation_token.is_cancelled() {
+                                println!("[AudioTask] Cancelled");
                                 break;
                             }
                         }
                     }
                 }
+
+                println!("[AudioTask] Ended");
             });
 
             let tx_clone = tx.clone();
             let stream = input_device.build_input_stream(
                 &stream_config,
                 move |data: &[f32], _| {
+                    println!("[AudioStream] Callback with {} samples", data.len());
                     let _ = tx_clone.try_send(data.to_vec());
                 },
                 move |err| {
-                    eprintln!("Stream error: {:?}", err);
+                    eprintln!("[AudioStream] Stream error: {:?}", err);
                 },
                 None,
             )?;
 
             stream.play()?;
+            println!("[AudioCapture] Stream started");
             Ok(stream)
         } else {
             Err(anyhow::anyhow!("No audio session initialized"))
         }
     }
-
     pub async fn stop_audio_capture(&self) {
         self.cancellation_token.cancel();
     }
