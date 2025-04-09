@@ -8,25 +8,25 @@ import { browser } from '$app/environment';
 import { createClient as legacyClient, WebsocketTransport } from '@rspc/client';
 
 export const client = createClient<Procedures>((args) => {
-	return fetchExecute(
-		{
-			url: PUBLIC_API_URL,
-			accessToken: user.accessToken
-		},
-		args
-	);
+  return fetchExecute(
+    {
+      url: PUBLIC_API_URL,
+      accessToken: user.accessToken,
+    },
+    args,
+  );
 });
 
 export const websocketClient = !browser
-	? client
-	: legacyClient<ProceduresLegacy>({
-			transport: new WebsocketTransport(PUBLIC_API_URL.replace('http', 'ws') + '/ws')
-		});
+  ? client
+  : legacyClient<ProceduresLegacy>({
+      transport: new WebsocketTransport(PUBLIC_API_URL.replace('http', 'ws') + '/ws'),
+    });
 
 export function wrapResponse<P extends Procedure>(result: ProcedureResult<P>) {
-	if (result.status !== 'ok') {
-		throw new Error(JSON.stringify(result.error));
-	}
+  if (result.status !== 'ok') {
+    throw new Error(JSON.stringify(result.error));
+  }
 
-	return result.data;
+  return result.data;
 }

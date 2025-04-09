@@ -34,6 +34,9 @@ importers:
       '@sveltejs/vite-plugin-svelte':
         specifier: ^5.0.0
         version: 5.0.3(svelte@5.22.6)(vite@6.2.1(jiti@2.4.2)(lightningcss@1.29.2)(yaml@2.7.1))
+      '@talky/soundhouse':
+        specifier: workspace:^
+        version: link:../talky-soundhouse
       '@tauri-apps/api':
         specifier: ^2.3.0
         version: 2.4.1
@@ -105,6 +108,8 @@ importers:
         version: 6.2.1(jiti@2.4.2)(lightningcss@1.29.2)(yaml@2.7.1)
 
   apps/talky-api: {}
+
+  apps/talky-soundhouse: {}
 
 packages:
 

@@ -1,0 +1,8 @@
+export type MessageResource = { id: string; user_id: string; timestamp: string; contents: string }
+export type UserResource = { user_id: string; type: "UserResource" }
+export type UserRoomResource = { user: UserResource; role: string; type: "UserRoomResource" }
+export type ClientInfoMsg = { user_id: string }
+export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
+export type RoomResource = { users: Partial<{ [key in string]: UserRoomResource[] }>; type: "RoomResource" }
+export type OutgoingMessage = { type: "init"; auth_code: string } | { type: "update_niche"; niche_id: string } | { type: "join"; channel_id: string; role: string } | { type: "candidate"; candidate: JsonValue; channel_id: string; niche_id: string } | { type: "answer"; answer: string; channel_id: string; niche_id: string } | { type: "offer"; offer: string; channel_id: string; niche_id: string } | { type: "chat_message"; content: string; channel_id: string } | { type: "web_rtc_signal"; target_client_id: string; signal_data: JsonValue }
+export type IncomingMessage = { type: "active_channels"; channels: Partial<{ [key in string]: RoomResource }> } | { type: "candidate"; candidate: JsonValue } | { type: "answer"; answer: string } | { type: "offer"; offer: string } | { type: "active_clients_update"; clients: ClientInfoMsg[] } | { type: "chat_message_broadcast"; sender_id: string; message: MessageResource; channel_id: string } | { type: "web_rtc_signal"; sender_client_id: string; signal_data: JsonValue } | { type: "error"; message: string }

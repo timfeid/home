@@ -3,18 +3,8 @@
 use std::time::Duration;
 
 use anyhow::Context;
-use app_lib::{run, AudioCaptureConfig, CaptureMode, WebRTCManager};
+use app_lib::run;
 use cpal::traits::{DeviceTrait, HostTrait};
-
-fn default_audio_config() -> AudioCaptureConfig {
-    AudioCaptureConfig {
-        sample_rate: 48000,
-        channels: 2,
-        buffer_size: 1024,
-        capture_mode: CaptureMode::PushToTalk,
-        voice_activity_threshold: -40.0,
-    }
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

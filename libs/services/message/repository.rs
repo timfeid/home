@@ -36,7 +36,7 @@ impl Model<MessageResource> for MessageModel {
         MessageResource {
             id: self.id.clone(),
             user_id: self.user_id.clone(),
-            timestamp: timestamp as u64,
+            timestamp: timestamp.to_string(),
             contents: self.contents.clone(),
         }
     }

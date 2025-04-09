@@ -67,7 +67,7 @@ pub struct AddChatMessageArgs {
 pub struct MessageResource {
     pub id: String,
     pub user_id: String,
-    pub timestamp: u64,
+    pub timestamp: String,
     pub contents: String,
     // category_tree: Vec<String>,
 }
@@ -84,7 +84,7 @@ impl MessageResource {
         MessageResource {
             id,
             user_id: args.user_id,
-            timestamp: (Utc::now().timestamp() * 1000) as u64,
+            timestamp: (Utc::now().timestamp() * 1000).to_string(),
             contents: args.contents,
         }
     }

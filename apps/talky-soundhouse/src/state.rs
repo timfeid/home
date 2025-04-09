@@ -3,6 +3,7 @@ use crate::message::{ClientInfoMsg, OutgoingMessage};
 use futures::{stream::SplitSink, SinkExt};
 use serde::Serialize;
 use serde_json::Value;
+use specta::Type;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use talky_data::database::create_connection;
@@ -30,14 +31,14 @@ impl RoomClientInfo {
     }
 }
 
-#[derive(Serialize, Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Type, Serialize, Debug, Clone, Hash, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub struct UserRoomResource {
     pub user: UserResource,
     pub role: String,
 }
 
-#[derive(Serialize, Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Type, Serialize, Debug, Clone, Hash, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub struct UserResource {
     pub user_id: String,
@@ -67,13 +68,16 @@ impl ClientInfo {
     }
 }
 
-#[derive(Serialize, Debug, Clone)]
+type UserId = String;
+type NicheId = String;
+type ClientId = String;
+#[derive(Type, Serialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub struct RoomResource {
-    users: HashSet<UserRoomResource>,
+    users: HashMap<UserId, Vec<UserRoomResource>>,
 }
 impl RoomResource {
-    async fn generate_active_channels_message(rooms: &HashMap<String, Room>) -> OutgoingMessage {
+    async fn generate_active_channels_message(rooms: &HashMap<NicheId, Room>) -> OutgoingMessage {
         let mut channels = HashMap::new();
         for (channel_id, room) in rooms.iter() {
             channels.insert(channel_id.clone(), room.to_resource().await);
@@ -85,7 +89,7 @@ impl RoomResource {
 
 #[derive(Debug)]
 pub struct Room {
-    clients: Arc<Mutex<HashMap<String, RoomClientInfo>>>,
+    clients: Arc<Mutex<HashMap<ClientId, RoomClientInfo>>>,
     channel: ChannelResource,
 }
 
@@ -107,9 +111,16 @@ impl Room {
     }
 
     pub async fn to_resource(&self) -> RoomResource {
-        RoomResource {
-            users: HashSet::from_iter(self.clients.lock().await.values().map(|v| v.get_resource())),
+        let mut users: HashMap<String, Vec<UserRoomResource>> = HashMap::new();
+        for client_info in self.clients.lock().await.values() {
+            let user_id = client_info.get_resource().user.user_id.clone();
+            users
+                .entry(user_id)
+                .or_insert_with(Vec::new)
+                .push(client_info.get_resource());
         }
+
+        RoomResource { users }
     }
 
     pub async fn remove_client(&self, client_id: &str) {

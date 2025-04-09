@@ -9,6 +9,7 @@ use crate::state::{RoomClientInfo, RoomResource};
 
 #[derive(Type, Deserialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[specta(rename = "OutgoingMessage")]
 pub enum IncomingMessage {
     Init {
         auth_code: String,
@@ -49,8 +50,9 @@ pub enum IncomingMessage {
     },
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Type, Serialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[specta(rename = "IncomingMessage")]
 pub enum OutgoingMessage {
     ActiveChannels {
         channels: HashMap<String, RoomResource>,
@@ -87,7 +89,7 @@ pub enum OutgoingMessage {
     },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Type, Serialize, Deserialize, Debug, Clone)]
 pub struct ClientInfoMsg {
     pub user_id: String,
 }
