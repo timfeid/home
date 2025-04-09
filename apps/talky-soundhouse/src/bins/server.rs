@@ -1,22 +1,10 @@
-mod config;
-mod error;
-mod handler;
-mod message;
-mod server;
-mod state;
-
-use crate::config::Config;
-use crate::error::AppResult;
-use crate::state::AppState;
-use server::build_routes;
-use talky_auth::JwtService;
+use lib::{self, config::Config, error::AppResult, server::build_routes, state::AppState};
 
 #[tokio::main]
 async fn main() -> AppResult<()> {
     dotenvy::dotenv().ok();
 
     tracing_subscriber::fmt().init();
-
     tracing::info!("Starting Soundhouse Server...");
 
     let config = Config::from_env()?;

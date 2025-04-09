@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{map::Values, Value};
+use specta::Type;
 use talky_services::message::service::MessageResource;
 
 use crate::state::{RoomClientInfo, RoomResource};
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Type, Deserialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IncomingMessage {
     Init {
@@ -21,6 +22,7 @@ pub enum IncomingMessage {
     },
     Candidate {
         candidate: Value,
+
         channel_id: String,
         // todo remove this
         niche_id: String,
