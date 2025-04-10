@@ -32,6 +32,7 @@
 	import GroupedAvatars from '../ui/avatar/grouped-avatars.svelte';
 	import * as Tooltip from '../ui/tooltip';
 	import { mergeProps } from 'bits-ui';
+	import VoiceControlPanel from '../voice-control/voice-control-panel.svelte';
 
 	let { niche }: { niche: Niche } = $props();
 	let categories = $state<Procedures['category_list']['output']['edges'][number]['node'][]>([]);
@@ -108,34 +109,39 @@
 </script>
 
 <Sidebar.Root>
-	<Sidebar.Header>
-		<Sidebar.Menu>
-			<Sidebar.MenuItem>
-				<DropdownMenu.Root>
-					<DropdownMenu.Trigger>
-						{#snippet child({ props })}
-							<Sidebar.MenuButton {...props}>
-								{niche.name}
-								<ChevronDown class="ml-auto" />
-							</Sidebar.MenuButton>
-						{/snippet}
-					</DropdownMenu.Trigger>
-					<DropdownMenu.Content class="w-[--bits-dropdown-menu-anchor-width]">
-						<DropdownMenu.Item>
+	<Sidebar.Header class="gap-2 p-0">
+		<VoiceControlPanel />
+
+		<div class="mx-2">
+			<Sidebar.Menu>
+				<Sidebar.MenuItem>
+					<DropdownMenu.Root>
+						<DropdownMenu.Trigger>
 							{#snippet child({ props })}
-								<a href="/of/hockey/devils" {...props}>Hockey</a>
+								<Sidebar.MenuButton {...props}>
+									{niche.name}
+									<ChevronDown class="ml-auto" />
+								</Sidebar.MenuButton>
 							{/snippet}
-						</DropdownMenu.Item>
-						<DropdownMenu.Item>
-							{#snippet child({ props })}
-								<a href="/of/pirate/movies" {...props}>Pirate</a>
-							{/snippet}
-						</DropdownMenu.Item>
-					</DropdownMenu.Content>
-				</DropdownMenu.Root>
-			</Sidebar.MenuItem>
-		</Sidebar.Menu>
+						</DropdownMenu.Trigger>
+						<DropdownMenu.Content class="w-[--bits-dropdown-menu-anchor-width]">
+							<DropdownMenu.Item>
+								{#snippet child({ props })}
+									<a href="/of/hockey/devils" {...props}>Hockey</a>
+								{/snippet}
+							</DropdownMenu.Item>
+							<DropdownMenu.Item>
+								{#snippet child({ props })}
+									<a href="/of/pirate/movies" {...props}>Pirate</a>
+								{/snippet}
+							</DropdownMenu.Item>
+						</DropdownMenu.Content>
+					</DropdownMenu.Root>
+				</Sidebar.MenuItem>
+			</Sidebar.Menu>
+		</div>
 	</Sidebar.Header>
+
 	<Sidebar.Content class="font-mono">
 		{#each categories as category}
 			<Sidebar.Group>
@@ -193,7 +199,7 @@
 										<Sidebar.MenuItem>
 											{#if creatingLobby.channelId === channel.id}
 												<Sidebar.MenuButton>
-													<div class="flex flex-1 items-center overflow-hidden text-purple-100">
+													<div class="flex flex-1 items-center overflow-hidden text-purple-200">
 														<AudioLines class="mr-1.5 h-4 w-4 flex-shrink-0" />
 														<span class="truncate font-light">{creatingLobby.name}</span>
 													</div>
@@ -207,7 +213,7 @@
 										{#each channel.lobbies as lobby}
 											<Sidebar.MenuItem>
 												<Sidebar.MenuButton>
-													<div class="flex flex-1 items-center overflow-hidden text-purple-100">
+													<div class="flex flex-1 items-center overflow-hidden text-purple-200">
 														<AudioLines class="mr-1.5 h-4 w-4 flex-shrink-0" />
 														<span class="truncate font-light">{lobby.name}</span>
 													</div>

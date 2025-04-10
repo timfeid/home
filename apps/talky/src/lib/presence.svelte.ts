@@ -155,7 +155,7 @@ export class Presence extends EventEmitter {
 		this.clearRetryTimer();
 
 		try {
-			const ws = new WebSocket(env.PUBLIC_SOUNDHOUSE_URL || 'http://localhost:8080/soundhouse');
+			const ws = new WebSocket(env.PUBLIC_SOUNDHOUSE_URL || 'ws://localhost:8080/soundhouse');
 			this.socket = ws;
 
 			ws.onopen = this.handleOpen.bind(this, ws, token);
