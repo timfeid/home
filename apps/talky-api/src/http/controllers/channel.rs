@@ -2,8 +2,7 @@ use bcrypt::verify;
 use sqlx::{Pool, Postgres};
 use talky_services::{
     channel::service::{
-        ChannelResource, ChannelService, ChannelType, CreateChannelArgs, ListChannelArgs,
-        ListChannelMeta,
+        ChannelResource, ChannelService, ChannelType, ListChannelArgs, ListChannelMeta,
     },
     message::service::{ListMessageArgs, ListMessageMeta, MessageResource, MessageService},
     pagination::ListResult,
@@ -29,18 +28,18 @@ pub struct ChannelController {
 }
 
 impl ChannelController {
-    pub async fn list(
-        self,
-        args: ListChannelArgs,
-    ) -> AppResult<ListResult<ChannelResource, ListChannelMeta>> {
-        let response = self
-            .channel_service
-            .list(&args)
-            .await
-            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+    // pub async fn list(
+    //     self,
+    //     args: ListChannelArgs,
+    // ) -> AppResult<ListResult<ChannelResource, ListChannelMeta>> {
+    //     let response = self
+    //         .channel_service
+    //         .list(&args)
+    //         .await
+    //         .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 
-        Ok(response)
-    }
+    //     Ok(response)
+    // }
 
     pub async fn find_by_slug(self, slug: String) -> AppResult<ChannelResource> {
         let response = self
@@ -78,33 +77,33 @@ impl ChannelController {
         Ok(response)
     }
 
-    pub async fn create(self, args: CreateChannelArgs) -> AppResult<ChannelResource> {
-        let user = self.ctx.required_user()?;
-        if !matches!(args.r#type, ChannelType::MultiMedia) {
-            return Err(AppError::BadRequest(
-                "multi_media type only supported".to_string(),
-            ));
-        }
+    // pub async fn create(self, args: CreateChannelArgs) -> AppResult<ChannelResource> {
+    //     let user = self.ctx.required_user()?;
+    //     if !matches!(args.r#type, ChannelType::MultiMedia) {
+    //         return Err(AppError::BadRequest(
+    //             "multi_media type only supported".to_string(),
+    //         ));
+    //     }
 
-        let response = self
-            .channel_service
-            .create(&args)
-            .await
-            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+    //     let response = self
+    //         .channel_service
+    //         .create(&args)
+    //         .await
+    //         .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 
-        Ok(response)
-    }
+    //     Ok(response)
+    // }
 
-    pub async fn list_in(self) -> AppResult<Vec<ChannelResource>> {
-        let user = self.ctx.required_user()?;
-        let response = self
-            .channel_service
-            .list_for_user(&user.sub)
-            .await
-            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+    // pub async fn list_in(self) -> AppResult<Vec<ChannelResource>> {
+    //     let user = self.ctx.required_user()?;
+    //     let response = self
+    //         .channel_service
+    //         .list_for_user(&user.sub)
+    //         .await
+    //         .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 
-        Ok(response)
-    }
+    //     Ok(response)
+    // }
 
     pub(crate) fn new(ctx: Ctx) -> Self {
         let channel_service = ChannelService::new(ctx.pool_clone());

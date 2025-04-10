@@ -1,5 +1,7 @@
+pub mod category;
 pub mod channel;
 pub mod error;
+pub mod lobby;
 pub mod message;
 pub mod niche;
 pub mod pagination;

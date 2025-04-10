@@ -7,7 +7,8 @@ use specta::Type;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use talky_data::database::create_connection;
-use talky_services::channel::service::{ChannelResource, ChannelService};
+use talky_services::channel::service::ChannelService;
+use talky_services::lobby::service::{LobbyResource, LobbyService};
 use talky_services::message::service::{AddChatMessageArgs, MessageResource, MessageService};
 use talky_services::niche::service::NicheService;
 use talky_services::DatabasePool;
@@ -77,7 +78,7 @@ pub struct RoomResource {
     users: HashMap<UserId, Vec<UserRoomResource>>,
 }
 impl RoomResource {
-    async fn generate_active_channels_message(rooms: &HashMap<NicheId, Room>) -> OutgoingMessage {
+    async fn generate_active_lobbies_message(rooms: &HashMap<NicheId, Room>) -> OutgoingMessage {
         let mut channels = HashMap::new();
         for (channel_id, room) in rooms.iter() {
             channels.insert(channel_id.clone(), room.to_resource().await);
@@ -90,11 +91,11 @@ impl RoomResource {
 #[derive(Debug)]
 pub struct Room {
     clients: Arc<Mutex<HashMap<ClientId, RoomClientInfo>>>,
-    channel: ChannelResource,
+    channel: LobbyResource,
 }
 
 impl Room {
-    fn new(channel: ChannelResource) -> Self {
+    fn new(channel: LobbyResource) -> Self {
         let clients = Arc::new(Mutex::new(HashMap::new()));
 
         Self { clients, channel }
@@ -106,7 +107,7 @@ impl Room {
         self.clients.lock().await.insert(client_id, room_client);
     }
 
-    pub fn get_channel(&self) -> &ChannelResource {
+    pub fn get_channel(&self) -> &LobbyResource {
         &self.channel
     }
 
@@ -132,7 +133,7 @@ impl Room {
 pub struct AppState {
     clients: Arc<Mutex<HashMap<String, ClientInfo>>>,
     // niche_id -> channel_id -> room
-    rooms: Arc<Mutex<HashMap<String, HashMap<String, Room>>>>,
+    lobbies: Arc<Mutex<HashMap<String, HashMap<String, Room>>>>,
     connection: DatabasePool,
 }
 
@@ -141,7 +142,7 @@ impl AppState {
         AppState {
             clients: Arc::new(Mutex::new(HashMap::new())),
             connection: create_connection(database_url).await,
-            rooms: Arc::new(Mutex::new(HashMap::new())),
+            lobbies: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -173,20 +174,20 @@ impl AppState {
 
     pub async fn remove_client_from_current_room(&self, client_id: &str) {
         let niche_keys: Vec<String> = {
-            let rooms_locked = self.rooms.lock().await;
+            let rooms_locked = self.lobbies.lock().await;
             rooms_locked.keys().cloned().collect()
         };
 
         let mut niches_to_notify = Vec::new();
 
         for niche_key in niche_keys.iter() {
-            let lock = self.rooms.lock().await;
-            let channel_map = lock.get(niche_key);
+            let lock = self.lobbies.lock().await;
+            let lobby_map = lock.get(niche_key);
 
-            if let Some(channel_map) = channel_map {
+            if let Some(lobby_map) = lobby_map {
                 let client_removed = {
                     let mut client_removed = false;
-                    for room in channel_map.values() {
+                    for room in lobby_map.values() {
                         let mut clients_locked = room.clients.lock().await;
                         if clients_locked.remove(client_id).is_some() {
                             client_removed = true;
@@ -256,23 +257,19 @@ impl AppState {
             .ok_or_else(|| AppError::Anyhow(anyhow::anyhow!("Client not found")))?
             .current_niche_id = Some(niche_id.to_string());
 
-        if let Some(channels) = self.rooms.lock().await.get(niche_id) {
-            let message = RoomResource::generate_active_channels_message(channels).await;
+        if let Some(lobbies) = self.lobbies.lock().await.get(niche_id) {
+            let message = RoomResource::generate_active_lobbies_message(lobbies).await;
             self.send_to_client(client_id, &message).await?;
         }
 
         Ok(())
     }
 
-    pub async fn join(&self, client_id: &str, channel_id: String, role: String) -> AppResult<()> {
-        tracing::info!(
-            "Client {} is attempting to join {}...",
-            client_id,
-            channel_id
-        );
-        let channel_service = ChannelService::new(self.connection.clone());
-        let channel = channel_service
-            .find_by_id(channel_id.clone())
+    pub async fn join(&self, client_id: &str, lobby_id: String, role: String) -> AppResult<()> {
+        tracing::info!("Client {} is attempting to join {}...", client_id, lobby_id);
+        let lobby_service = LobbyService::new(self.connection.clone());
+        let lobby = lobby_service
+            .find_by_id(lobby_id.clone())
             .await
             .map_err(AppError::from)?;
 
@@ -286,18 +283,16 @@ impl AppState {
 
         self.remove_client_from_current_room(client_id).await;
 
-        let channel_niche_id = channel.niche_id.clone();
-        let channel_id = channel.id.clone();
+        let lobby_niche_id = lobby.niche_id.clone();
+        let lobby_id = lobby.id.clone();
 
-        self.update_niche(client_id, &channel_niche_id).await?;
+        self.update_niche(client_id, &lobby_niche_id).await?;
 
         {
-            let mut channels = self.rooms.lock().await;
-            let rooms = channels.entry(channel_niche_id.clone()).or_default();
+            let mut lobbies = self.lobbies.lock().await;
+            let rooms = lobbies.entry(lobby_niche_id.clone()).or_default();
 
-            let room = rooms
-                .entry(channel_id.clone())
-                .or_insert(Room::new(channel));
+            let room = rooms.entry(lobby_id.clone()).or_insert(Room::new(lobby));
 
             room.add_client(client, role).await;
         }
@@ -305,10 +300,10 @@ impl AppState {
         tracing::info!(
             "Added client with id {} to room with id {}. ",
             client_id,
-            channel_id
+            lobby_id
         );
 
-        self.broadcast_niche_clients(&channel_niche_id).await;
+        self.broadcast_niche_clients(&lobby_niche_id).await;
 
         Ok(())
     }
@@ -432,7 +427,7 @@ impl AppState {
 
         // Retrieve and drop the lock before generating the message
         {
-            if let Some(channels) = self.rooms.lock().await.get(niche_id) {
+            if let Some(lobbies) = self.lobbies.lock().await.get(niche_id) {
                 self.broadcast_niche(
                     |client| {
                         client.current_niche_id.as_ref().map(|s| s.as_str()) == Some(niche_id)
@@ -452,8 +447,8 @@ impl AppState {
 
         // Retrieve and drop the lock before generating the message
         {
-            if let Some(channels) = self.rooms.lock().await.get(niche_id) {
-                let message = RoomResource::generate_active_channels_message(channels).await;
+            if let Some(lobbies) = self.lobbies.lock().await.get(niche_id) {
+                let message = RoomResource::generate_active_lobbies_message(lobbies).await;
                 self.broadcast_niche(
                     |client| client.current_niche_id.as_ref().map(|s| s.as_str()) == Some(niche_id),
                     &message,
@@ -473,7 +468,7 @@ impl AppState {
         niche_id: String,
     ) -> AppResult<()> {
         let valid_client_ids: HashSet<String> = {
-            let rooms_locked = self.rooms.lock().await;
+            let rooms_locked = self.lobbies.lock().await;
             match rooms_locked.get(&niche_id) {
                 Some(channels) => {
                     if let Some(room) = channels.get(&channel_id) {
@@ -502,7 +497,7 @@ impl AppState {
         niche_id: String,
     ) -> AppResult<()> {
         let valid_client_ids: HashSet<String> = {
-            let rooms_locked = self.rooms.lock().await;
+            let rooms_locked = self.lobbies.lock().await;
             match rooms_locked.get(&niche_id) {
                 Some(channels) => {
                     if let Some(room) = channels.get(&channel_id) {
@@ -532,7 +527,7 @@ impl AppState {
         niche_id: String,
     ) -> AppResult<()> {
         let valid_client_ids: HashSet<String> = {
-            let rooms_locked = self.rooms.lock().await;
+            let rooms_locked = self.lobbies.lock().await;
             match rooms_locked.get(&niche_id) {
                 Some(channels) => {
                     if let Some(room) = channels.get(&channel_id) {

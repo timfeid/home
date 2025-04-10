@@ -12,43 +12,27 @@ use sqlx::{query, query_as};
 
 use crate::{
     error::{AppResult, ServicesError},
+    lobby::repository::LobbyModel,
     pagination::{Cursor, Model},
     repository::Repository,
     DatabasePool,
 };
 
-use super::service::{ChannelResource, ChannelType, CreateChannelArgs, ListChannelArgs};
+use super::service::{ChannelResource, ChannelType, ListChannelArgs};
 
 pub(crate) struct ChannelRepository {
     connection: DatabasePool,
 }
 
+#[derive(Deserialize)]
 pub(crate) struct ChannelModel {
     pub(super) id: String,
     pub(super) name: String,
     pub(super) slug: String,
     pub(super) r#type: ChannelType,
+    pub(super) category_id: String,
     pub(super) niche_id: String,
-    pub(super) is_temporary: bool,
-}
-
-impl ChannelModel {
-    pub fn new(name: String) -> Self {
-        Self {
-            id: name.to_lowercase(),
-            slug: name.to_lowercase(),
-            r#type: if &name == "Gameday" {
-                ChannelType::Chat
-            } else if &name == "News" {
-                ChannelType::Feed
-            } else {
-                ChannelType::MultiMedia
-            },
-            name,
-            niche_id: "".to_string(),
-            is_temporary: false,
-        }
-    }
+    pub(super) lobbies: Vec<LobbyModel>,
 }
 
 impl Model<ChannelResource> for ChannelModel {
@@ -60,10 +44,10 @@ impl Model<ChannelResource> for ChannelModel {
         ChannelResource {
             name: self.name.clone(),
             id: self.id.clone(),
-            niche_id: self.niche_id.clone(),
             slug: self.slug.clone(),
             r#type: self.r#type.clone(),
-            is_temporary: self.is_temporary.clone(),
+            niche_id: self.niche_id.clone(),
+            lobbies: self.lobbies.iter().map(|lobby| lobby.to_node()).collect(),
         }
     }
 }
@@ -73,62 +57,61 @@ impl ChannelRepository {
         Self { connection }
     }
 
-    pub async fn list_for_user(&self, user_id: &str) -> AppResult<Vec<ChannelModel>> {
-        Ok(vec![
-            ChannelModel::new("News".to_string()),
-            ChannelModel::new("Gameday".to_string()),
-        ])
-    }
-
     pub async fn find_by_id(&self, id: String) -> AppResult<ChannelModel> {
-        query_as!(
-            ChannelModel,
-            r#"select
-                id,
-                name,
-                slug,
-                type as "type: ChannelType",
-                niche_id,
-                is_temporary
-                from channels where id = $1"#,
-            id
-        )
-        .fetch_one(self.connection.as_ref())
-        .await
-        .map_err(ServicesError::from)
+        self.find_one_by("id", id).await
     }
 
     pub async fn find_by_slug(&self, slug: String) -> AppResult<ChannelModel> {
-        let name = slug
-            .chars()
-            .enumerate()
-            .map(|(i, c)| {
-                if i == 0 {
-                    c.to_uppercase().collect::<String>()
-                } else {
-                    c.to_string()
-                }
-            })
-            .collect::<String>();
-        Ok(ChannelModel::new(name))
+        self.find_one_by("slug", slug).await
     }
 
-    pub async fn create(&self, args: &CreateChannelArgs) -> AppResult<ChannelModel> {
-        let id = ulid::Ulid::new().to_string();
-        let slug = slugify!(&args.name);
-
-        query_as!(
-                    ChannelModel,
-                    "insert into channels (id, name, slug, type, niche_id, is_temporary) values ($1, $2, $3, $4, $5, true) returning id, name, is_temporary, slug, type as \"type: ChannelType\", niche_id",
-
+    async fn find_one_by(&self, column: &str, value: String) -> AppResult<ChannelModel> {
+        let query_string = format!(
+            r#"select
                     id,
-                    args.name,
+                    name,
                     slug,
-                    args.r#type as ChannelType,
-                    args.niche_id,
-                )
-                .fetch_one(self.connection.as_ref())
-                .await.map_err(ServicesError::from)
+                    type as "type: ChannelType",
+                    category_id,
+                    coalesce((select niche_id from categories where id = category_id), '') as "niche_id!",
+
+                    coalesce((select json_agg(json_build_object('id', id, 'name', name, 'channel_id', channel_id, 'owner_user_id', owner_user_id)) from lobbies where lobbies.channel_id = channels.id), '[]'::json)
+ as lobbies
+                    from channels where {} = $1"#,
+            column
+        );
+
+        let row: (
+            String,
+            String,
+            String,
+            ChannelType,
+            String,
+            String,
+            Option<serde_json::Value>,
+        ) = query_as(&query_string)
+            .bind(value)
+            .fetch_one(self.connection.as_ref())
+            .await
+            .map_err(ServicesError::from)?;
+
+        let (id, name, slug, r#type, category_id, niche_id, json_lobbies) = row;
+
+        // Manually convert JsonValue into Vec<LobbyModel>
+        let lobbies: Vec<LobbyModel> = match json_lobbies {
+            Some(json_value) => serde_json::from_value(json_value).unwrap_or_default(),
+            None => vec![],
+        };
+
+        Ok(ChannelModel {
+            id,
+            name,
+            slug,
+            r#type,
+            category_id,
+            niche_id,
+            lobbies,
+        })
     }
 }
 
@@ -167,46 +150,5 @@ impl Display for ChannelCursor {
             Ok(json) => write!(f, "{}", json),
             Err(_) => write!(f, ""),
         }
-    }
-}
-
-impl Repository<ChannelModel, ListChannelArgs> for ChannelRepository {
-    async fn count(&self, args: &ListChannelArgs) -> AppResult<i32> {
-        let row = query!(
-            r#"select
-                count(*) as count
-                from channels where niche_id = $1"#,
-            args.niche_id
-        )
-        .fetch_one(self.connection.as_ref())
-        .await?;
-
-        Ok(row.count.unwrap_or_else(|| 0).try_into().unwrap())
-    }
-
-    async fn find(
-        &self,
-        after: Option<(
-            crate::repository::CursorDirection,
-            impl crate::pagination::Cursor + Send,
-        )>,
-        take: i32,
-        args: &ListChannelArgs,
-    ) -> AppResult<Vec<ChannelModel>> {
-        query_as!(
-            ChannelModel,
-            r#"select
-                id,
-                name,
-                slug,
-                type as "type: ChannelType",
-                niche_id,
-                is_temporary
-                from channels where niche_id = $1"#,
-            args.niche_id
-        )
-        .fetch_all(self.connection.as_ref())
-        .await
-        .map_err(ServicesError::from)
     }
 }
