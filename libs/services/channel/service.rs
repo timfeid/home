@@ -6,6 +6,7 @@ use specta::Type;
 
 use crate::{
     error::AppResult,
+    lobby::service::LobbyResource,
     niche::service::NicheResource,
     pagination::{
         connection_from_repository, Cursor, ListResult, Model, Node, PaginationArgs, WithPagination,
@@ -69,6 +70,7 @@ pub struct ChannelResource {
     pub slug: String,
     pub r#type: ChannelType,
     pub niche_id: String,
+    pub lobbies: Vec<LobbyResource>,
     // category_tree: Vec<String>,
 }
 

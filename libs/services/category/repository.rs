@@ -143,43 +143,73 @@ impl Repository<CategoryModel, ListCategoryArgs> for CategoryRepository {
 
     async fn find(
         &self,
-        after: Option<(
+        _after: Option<(
             crate::repository::CursorDirection,
             impl crate::pagination::Cursor + Send,
         )>,
-        take: i32,
+        _take: i32,
         args: &ListCategoryArgs,
     ) -> AppResult<Vec<CategoryModel>> {
         let rows = query!(
-                r#"select
-                        id,
-                        name,
-                        niche_id,
-                        (select json_agg(json_build_object(
-                                        'id', id,
-                                        'name', name,
-                                        'slug', slug,
-                                        'type', type,
-                                        'category_id', category_id,
-                                        'niche_id', niche_id
-                                        )) from channels where category_id = categories.id) as channels
-                        from categories where niche_id = $1"#,
-                args.niche_id
-            )
-            .fetch_all(self.connection.as_ref())
-            .await
-            .map_err(ServicesError::from)?;
+            r#"
+            SELECT
+                id,
+                name,
+                niche_id,
+                (
+                    SELECT json_agg(json_build_object(
+                        'id', id,
+                        'name', name,
+                        'slug', slug,
+                        'type', type,
+                        'category_id', category_id,
+                        'niche_id', niche_id,
+                        'lobbies',
+                        COALESCE(
+                            (
+                                SELECT json_agg(json_build_object(
+                                    'id', id,
+                                    'name', name,
+                                    'channel_id', channel_id,
+                                    'owner_user_id', owner_user_id,
+                                    'niche_id', niche_id
+                                ))
+                                FROM lobbies
+                                WHERE lobbies.channel_id = channels.id
+                            ),
+                            '[]'::json
+                        )
+                    ))
+                    FROM channels
+                    WHERE category_id = categories.id
+                ) AS channels
+            FROM categories
+            WHERE niche_id = $1
+            "#,
+            args.niche_id
+        )
+        .fetch_all(self.connection.as_ref())
+        .await
+        .map_err(ServicesError::from)?;
 
         let categories = rows
             .into_iter()
-            .map(|row| CategoryModel {
-                id: row.id,
-                name: row.name,
-                niche_id: row.niche_id,
-                channels: serde_json::from_value(row.channels.unwrap_or_default())
-                    .unwrap_or_default(),
+            .map(|row| {
+                let channels_value = row.channels.as_ref().unwrap_or(&serde_json::Value::Null);
+                let channels = serde_json::from_value(channels_value.clone()).map_err(|e| {
+                    ServicesError::SQLError(format!(
+                        "Failed to unwrap channel details: {:?}\nrow:{:?}",
+                        e, row
+                    ))
+                })?;
+                Ok(CategoryModel {
+                    id: row.id,
+                    name: row.name,
+                    niche_id: row.niche_id,
+                    channels,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, ServicesError>>()?;
 
         Ok(categories)
     }

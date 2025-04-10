@@ -72,6 +72,7 @@ pub struct LobbyResource {
     pub id: String,
     pub name: String,
     pub channel_id: String,
+    pub niche_id: String,
     pub owner_user_id: String,
 }
 

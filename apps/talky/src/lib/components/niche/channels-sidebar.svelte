@@ -14,19 +14,24 @@
 		ChevronDown,
 		ChevronUp,
 		Cog,
+		DiamondPlus,
 		Hash,
 		MessageSquare,
+		PhoneCall,
 		Plus,
 		RadioTower,
-		Settings
+		Settings,
+		UserRoundPlus
 	} from 'lucide-svelte';
 	import Badge from '../ui/badge/badge.svelte';
 	import type { Niche } from './niche.svelte';
-	import type { OutgoingMessage } from '@talky/soundhouse';
+	import type { OutgoingMessage, RoomResource } from '@talky/soundhouse';
 	import * as Collapsible from '$lib/components/ui/collapsible/index.js';
 	import SettingsDialog from '../settings/settings-dialog.svelte';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import GroupedAvatars from '../ui/avatar/grouped-avatars.svelte';
+	import * as Tooltip from '../ui/tooltip';
+	import { mergeProps } from 'bits-ui';
 
 	let { niche }: { niche: Niche } = $props();
 	let categories = $state<Procedures['category_list']['output']['edges'][number]['node'][]>([]);
@@ -35,12 +40,12 @@
 	let pageInfo: PageInfo | undefined = $state();
 	const presence = withPresence();
 
-	async function joinChannel(channelId: string) {
+	async function joinLobby(lobbyId: string) {
 		if (!user.user) {
 			return;
 		}
 
-		presence.joinChannel(channelId);
+		presence.joinLobby(lobbyId);
 	}
 
 	$effect(() => {
@@ -59,28 +64,40 @@
 		}
 	});
 
-	let creatingLobbyName = $state('');
-	async function createLobby(channelId: string) {
+	let creatingLobby = $state({ name: '', channelId: '' });
+	async function createLobby(channel: unknown) {
+		console.log(channel);
 		const randomChannelName = `${user.user!.sub}-${Math.random().toString(36).substring(2, 7)}`;
-		creatingLobbyName = randomChannelName;
+		creatingLobby.name = randomChannelName;
+		creatingLobby.channelId = channel.id;
 		try {
 			const response = wrapResponse(
 				await client.lobby_create_temporary.query({
 					name: randomChannelName,
-					channel_id: channelId
+					channel_id: channel.id
 				})
 			);
-
-			categories.push(response);
+			channel.lobbies.push(response);
+			await joinLobby(response.id);
 		} catch (e) {}
 
-		creatingLobbyName = '';
+		creatingLobby.channelId = '';
 	}
 
 	async function resetChannels() {
 		const response = wrapResponse(await client.category_list.query({ niche_id: niche.id }));
 		pageInfo = response.page_info;
 		categories = response.edges.map((edge) => edge.node);
+	}
+
+	function getUsers(lobby: RoomResource | undefined) {
+		if (!lobby || !Object.keys(lobby.users).length) {
+			return [];
+		}
+
+		return Object.values(lobby.users)
+			.map((ru) => ru?.[0].user)
+			.filter((u) => !!u);
 	}
 
 	$effect(() => {
@@ -119,7 +136,7 @@
 			</Sidebar.MenuItem>
 		</Sidebar.Menu>
 	</Sidebar.Header>
-	<Sidebar.Content>
+	<Sidebar.Content class="font-mono">
 		{#each categories as category}
 			<Sidebar.Group>
 				<Sidebar.GroupLabel>{category.name}</Sidebar.GroupLabel>
@@ -133,44 +150,99 @@
 											href="/of/{niche.slug}/{channel.slug}"
 											{...props}
 											class={cn(
+												'flex flex-1 items-center overflow-hidden',
 												props.class || '',
-												page.params.channel === channel.slug ? 'bg-sidebar-accent/55' : ''
+												page.params.channel === channel.slug
+													? 'bg-sidebar-accent hover:bg-sidebar-accent'
+													: ''
 											)}
 										>
-											<div class="flex flex-1 items-center overflow-hidden">
-												{#if channel.type === 'chat'}
-													<Hash class="mr-1.5 h-4 w-4 flex-shrink-0" />
-												{:else if channel.type === 'feed'}
-													<Hash class="mr-1.5 h-4 w-4 flex-shrink-0" />
-												{:else}
-													<AudioLines class="mr-1.5 h-4 w-4 flex-shrink-0" />
-												{/if}
-												<span class="truncate font-light">{channel.name}</span>
-											</div>
+											{#if channel.type === 'chat'}
+												<Hash class="mr-1.5 h-4 w-4 flex-shrink-0" />
+											{:else if channel.type === 'feed'}
+												<Hash class="mr-1.5 h-4 w-4 flex-shrink-0" />
+											{:else}
+												<AudioLines class="mr-1.5 h-4 w-4 flex-shrink-0" />
+											{/if}
+											<span class="truncate">{channel.name}</span>
 										</a>
 									{/snippet}
 								</Sidebar.MenuButton>
-								<Sidebar.MenuSub>
-									<Sidebar.MenuItem>
-										<Sidebar.MenuButton>
-											<div class="flex flex-1 items-center overflow-hidden text-purple-200">
-												<AudioLines class="mr-1.5 h-4 w-4 flex-shrink-0" />
-												<span class="truncate font-light">dazed-k2zs5</span>
-											</div>
-											{#snippet tooltipContent()}
-												dazed
-											{/snippet}
-											<GroupedAvatars
-												avatars={[
-													{ user_id: 'dazed', type: 'UserResource' },
-													{ user_id: 'jumbo', type: 'UserResource' },
-													{ user_id: 'erickuh', type: 'UserResource' },
-													{ user_id: 'africkuh', type: 'UserResource' }
-												]}
-											/>
-										</Sidebar.MenuButton>
-									</Sidebar.MenuItem>
-								</Sidebar.MenuSub>
+
+								<Sidebar.MenuAction showOnHover class="-mt-0.5 !h-6 !w-6">
+									{#snippet child({ props: actionProps })}
+										<Tooltip.Root delayDuration={1000}>
+											<Tooltip.Trigger>
+												{#snippet child({ props: tooltipProps })}
+													<button
+														{...mergeProps(tooltipProps, actionProps)}
+														onclick={() => createLobby(channel)}
+													>
+														<DiamondPlus class="!size-4" />
+														<span class="sr-only"></span>
+													</button>
+												{/snippet}
+											</Tooltip.Trigger>
+											<Tooltip.Content>Create a lobby</Tooltip.Content>
+										</Tooltip.Root>
+									{/snippet}
+								</Sidebar.MenuAction>
+
+								{#if channel.lobbies.length > 0 || creatingLobby.channelId === channel.id}
+									<Sidebar.MenuSub>
+										<Sidebar.MenuItem>
+											{#if creatingLobby.channelId === channel.id}
+												<Sidebar.MenuButton>
+													<div class="flex flex-1 items-center overflow-hidden text-purple-100">
+														<AudioLines class="mr-1.5 h-4 w-4 flex-shrink-0" />
+														<span class="truncate font-light">{creatingLobby.name}</span>
+													</div>
+													{#snippet tooltipContent()}
+														{creatingLobby.name}
+													{/snippet}
+													<GroupedAvatars max={3} avatars={[{ user_id: user.user!.sub }]} />
+												</Sidebar.MenuButton>
+											{/if}
+										</Sidebar.MenuItem>
+										{#each channel.lobbies as lobby}
+											<Sidebar.MenuItem>
+												<Sidebar.MenuButton>
+													<div class="flex flex-1 items-center overflow-hidden text-purple-100">
+														<AudioLines class="mr-1.5 h-4 w-4 flex-shrink-0" />
+														<span class="truncate font-light">{lobby.name}</span>
+													</div>
+													{#snippet tooltipContent()}
+														{lobby.name}
+													{/snippet}
+													<GroupedAvatars
+														max={3}
+														avatars={getUsers(withPresence().activeChannels[lobby.id])}
+													/>
+												</Sidebar.MenuButton>
+
+												<Sidebar.MenuAction showOnHover class="-mt-0.5 !h-6 !w-6">
+													{#snippet child({ props: actionProps })}
+														<Tooltip.Root delayDuration={1000}>
+															<Tooltip.Trigger>
+																{#snippet child({ props: tooltipProps })}
+																	<button
+																		{...mergeProps(tooltipProps, actionProps)}
+																		onclick={() => joinLobby(lobby.id)}
+																	>
+																		<PhoneCall class="!size-4" />
+																		<span class="sr-only">Toggle</span>
+																	</button>
+																{/snippet}
+															</Tooltip.Trigger>
+															<Tooltip.Content>Join this lobby</Tooltip.Content>
+														</Tooltip.Root>
+													{/snippet}
+												</Sidebar.MenuAction>
+											</Sidebar.MenuItem>
+										{/each}
+									</Sidebar.MenuSub>
+								{/if}
+
 								<!-- <Sidebar.MenuSub>
 									{#each [[{ user: { user_id: 'dazed' } }]] as u}
 										{#if u}

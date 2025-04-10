@@ -23,10 +23,12 @@ pub(crate) struct LobbyRepository {
     connection: DatabasePool,
 }
 
+#[derive(Deserialize)]
 pub(crate) struct LobbyModel {
     pub(super) id: String,
     pub(super) name: String,
     pub(super) channel_id: String,
+    pub(super) niche_id: String,
     pub(super) owner_user_id: String,
 }
 
@@ -39,6 +41,7 @@ impl Model<LobbyResource> for LobbyModel {
         LobbyResource {
             id: self.id.clone(),
             name: self.name.clone(),
+            niche_id: self.niche_id.clone(),
             channel_id: self.channel_id.clone(),
             owner_user_id: self.owner_user_id.clone(),
         }
@@ -54,11 +57,17 @@ impl LobbyRepository {
         query_as!(
             LobbyModel,
             r#"select
-                id,
-                name,
-                channel_id,
-                owner_user_id
-                from lobbies where id = $1"#,
+                lobbies.id,
+                lobbies.name,
+                lobbies.channel_id,
+                lobbies.owner_user_id,
+                niches.id as niche_id
+
+                from lobbies
+                join channels on channels.id = lobbies.channel_id
+                join categories on categories.id = channels.category_id
+                join niches on niches.id = categories.niche_id
+                where lobbies.id = $1"#,
             id
         )
         .fetch_one(self.connection.as_ref())
@@ -73,16 +82,18 @@ impl LobbyRepository {
     ) -> AppResult<LobbyModel> {
         let id = ulid::Ulid::new().to_string();
 
-        query_as!(
-                    LobbyModel,
-                    "insert into lobbies (id, name, channel_id, owner_user_id) values ($1, $2, $3, $4) returning id, name, channel_id, owner_user_id",
-                    id,
-                    args.name,
-                    args.channel_id,
-                    owner_user_id,
-                )
-                .fetch_one(self.connection.as_ref())
-                .await.map_err(ServicesError::from)
+        query!(
+            "insert into lobbies (id, name, channel_id, owner_user_id) values ($1, $2, $3, $4)",
+            id,
+            args.name,
+            args.channel_id,
+            owner_user_id,
+        )
+        .execute(self.connection.as_ref())
+        .await
+        .map_err(ServicesError::from)?;
+
+        self.find_by_id(id).await
     }
 }
 

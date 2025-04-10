@@ -12,6 +12,7 @@ use sqlx::{query, query_as};
 
 use crate::{
     error::{AppResult, ServicesError},
+    lobby::repository::LobbyModel,
     pagination::{Cursor, Model},
     repository::Repository,
     DatabasePool,
@@ -31,6 +32,7 @@ pub(crate) struct ChannelModel {
     pub(super) r#type: ChannelType,
     pub(super) category_id: String,
     pub(super) niche_id: String,
+    pub(super) lobbies: Vec<LobbyModel>,
 }
 
 impl Model<ChannelResource> for ChannelModel {
@@ -45,6 +47,7 @@ impl Model<ChannelResource> for ChannelModel {
             slug: self.slug.clone(),
             r#type: self.r#type.clone(),
             niche_id: self.niche_id.clone(),
+            lobbies: self.lobbies.iter().map(|lobby| lobby.to_node()).collect(),
         }
     }
 }
@@ -55,39 +58,60 @@ impl ChannelRepository {
     }
 
     pub async fn find_by_id(&self, id: String) -> AppResult<ChannelModel> {
-        query_as!(
-                    ChannelModel,
-                    r#"select
-                        id,
-                        name,
-                        slug,
-                        type as "type: ChannelType",
-                        category_id,
-                        coalesce((select niche_id from categories where id = category_id), '') as "niche_id!"
-                        from channels where id = $1"#,
-                    id
-                )
-                .fetch_one(self.connection.as_ref())
-                .await
-                .map_err(ServicesError::from)
+        self.find_one_by("id", id).await
     }
 
     pub async fn find_by_slug(&self, slug: String) -> AppResult<ChannelModel> {
-        query_as!(
-            ChannelModel,
+        self.find_one_by("slug", slug).await
+    }
+
+    async fn find_one_by(&self, column: &str, value: String) -> AppResult<ChannelModel> {
+        let query_string = format!(
             r#"select
-                id,
-                name,
-                slug,
-                type as "type: ChannelType",
-                category_id,
-                coalesce((select niche_id from categories where id = category_id), '') as "niche_id!"
-                from channels where slug = $1"#,
-            slug
-        )
-        .fetch_one(self.connection.as_ref())
-        .await
-        .map_err(ServicesError::from)
+                    id,
+                    name,
+                    slug,
+                    type as "type: ChannelType",
+                    category_id,
+                    coalesce((select niche_id from categories where id = category_id), '') as "niche_id!",
+
+                    coalesce((select json_agg(json_build_object('id', id, 'name', name, 'channel_id', channel_id, 'owner_user_id', owner_user_id)) from lobbies where lobbies.channel_id = channels.id), '[]'::json)
+ as lobbies
+                    from channels where {} = $1"#,
+            column
+        );
+
+        let row: (
+            String,
+            String,
+            String,
+            ChannelType,
+            String,
+            String,
+            Option<serde_json::Value>,
+        ) = query_as(&query_string)
+            .bind(value)
+            .fetch_one(self.connection.as_ref())
+            .await
+            .map_err(ServicesError::from)?;
+
+        let (id, name, slug, r#type, category_id, niche_id, json_lobbies) = row;
+
+        // Manually convert JsonValue into Vec<LobbyModel>
+        let lobbies: Vec<LobbyModel> = match json_lobbies {
+            Some(json_value) => serde_json::from_value(json_value).unwrap_or_default(),
+            None => vec![],
+        };
+
+        Ok(ChannelModel {
+            id,
+            name,
+            slug,
+            r#type,
+            category_id,
+            niche_id,
+            lobbies,
+        })
     }
 }
 
