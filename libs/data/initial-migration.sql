@@ -53,6 +53,19 @@ CREATE TABLE public._prisma_migrations (
 ALTER TABLE public._prisma_migrations OWNER TO postgres;
 
 --
+-- Name: categories; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.categories (
+    name text NOT NULL,
+    niche_id text NOT NULL,
+    id text NOT NULL
+);
+
+
+ALTER TABLE public.categories OWNER TO postgres;
+
+--
 -- Name: channels; Type: TABLE; Schema: public; Owner: postgres
 --
 
@@ -61,12 +74,26 @@ CREATE TABLE public.channels (
     name text NOT NULL,
     slug text NOT NULL,
     type public.channel_type NOT NULL,
-    niche_id text NOT NULL,
+    category_id text NOT NULL,
     is_temporary boolean DEFAULT false NOT NULL
 );
 
 
 ALTER TABLE public.channels OWNER TO postgres;
+
+--
+-- Name: lobbies; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.lobbies (
+    id text NOT NULL,
+    name text NOT NULL,
+    owner_user_id text NOT NULL,
+    channel_id text NOT NULL
+);
+
+
+ALTER TABLE public.lobbies OWNER TO postgres;
 
 --
 -- Name: messages; Type: TABLE; Schema: public; Owner: postgres
@@ -132,6 +159,14 @@ ALTER TABLE ONLY public._prisma_migrations
 
 
 --
+-- Name: categories categories_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.categories
+    ADD CONSTRAINT categories_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: channels channels_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -153,6 +188,14 @@ ALTER TABLE ONLY public.channels
 
 ALTER TABLE ONLY public.messages
     ADD CONSTRAINT chat_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: lobbies lobbies_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.lobbies
+    ADD CONSTRAINT lobbies_pkey PRIMARY KEY (id);
 
 
 --
@@ -188,11 +231,43 @@ ALTER TABLE ONLY public.users
 
 
 --
--- Name: channels channels_niche_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+-- Name: categories categories_niche_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.categories
+    ADD CONSTRAINT categories_niche_id_fkey FOREIGN KEY (niche_id) REFERENCES public.niches(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: channels channels_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.channels
-    ADD CONSTRAINT channels_niche_id_fkey FOREIGN KEY (niche_id) REFERENCES public.niches(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+    ADD CONSTRAINT channels_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: lobbies lobbies_channel_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.lobbies
+    ADD CONSTRAINT lobbies_channel_id_fkey FOREIGN KEY (channel_id) REFERENCES public.channels(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: lobbies lobbies_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.lobbies
+    ADD CONSTRAINT lobbies_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: messages messages_channel_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.messages
+    ADD CONSTRAINT messages_channel_id_fkey FOREIGN KEY (channel_id) REFERENCES public.channels(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --
