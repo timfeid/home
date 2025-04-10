@@ -205,7 +205,7 @@
       </Sidebar.GroupContent>
     </Sidebar.Group>
     <Sidebar.Group>
-      <Sidebar.GroupLabel>Permanent Channels</Sidebar.GroupLabel>
+      <Sidebar.GroupLabel>General</Sidebar.GroupLabel>
       <Sidebar.GroupContent>
         <Sidebar.Menu>
           {#each permChannels as channel}

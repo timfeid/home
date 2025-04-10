@@ -14,7 +14,8 @@ use webrtc::WebRTCManager;
 pub fn run() {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
 
-    let signaling_url = "ws://localhost:8080/soundhouse".to_string();
+    let signaling_url: String =
+        env::var("SERVER_ADDR").unwrap_or_else(|_| "ws://localhost:8080/soundhouse".to_string());
 
     let (tx, rx) = std::sync::mpsc::channel();
 

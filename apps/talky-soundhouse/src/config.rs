@@ -10,7 +10,7 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> AppResult<Self> {
-        let server_addr_str =
+        let server_addr_str: String =
             env::var("SERVER_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
         let server_addr = server_addr_str
             .parse::<SocketAddr>()

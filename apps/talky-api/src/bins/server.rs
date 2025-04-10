@@ -1,4 +1,4 @@
-use std::{fs::write, future::IntoFuture, path::PathBuf, sync::Arc};
+use std::{env, fs::write, future::IntoFuture, path::PathBuf, sync::Arc};
 
 use axum::{
     extract::{
@@ -140,7 +140,12 @@ async fn create_app() -> axum::Router {
 async fn main() {
     // handler(context).await;
 
+    let server_addr_str: String =
+        env::var("SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".to_string());
     let app = create_app().await;
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(server_addr_str.clone())
+        .await
+        .unwrap();
+    println!("Listening at http://{}", server_addr_str);
     axum::serve(listener, app).await.unwrap();
 }

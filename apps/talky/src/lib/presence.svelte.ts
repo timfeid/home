@@ -3,8 +3,9 @@ import { user } from './user.svelte.js';
 import { connectAudio, isTauri } from './tauri/tauri.js';
 import { page } from '$app/state';
 import { type ClientInfoMsg, type IncomingMessage, type RoomResource } from '@talky/soundhouse';
+import { env } from '$env/dynamic/public';
 
-const SOUNDHOUSE_URL = 'ws://localhost:8080/soundhouse';
+
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 3000;
 
@@ -150,7 +151,7 @@ export class Presence extends EventEmitter {
     this.clearRetryTimer();
 
     try {
-      const ws = new WebSocket(SOUNDHOUSE_URL);
+      const ws = new WebSocket(env.PUBLIC_SOUNDHOUSE_URL);
       this.socket = ws;
 
       ws.onopen = this.handleOpen.bind(this, ws, token);

@@ -3,7 +3,7 @@
   import UserList from '$lib/user-list/user-list.svelte';
   import type { Procedures } from '@feid/bindings';
   import { onMount, type Snippet } from 'svelte';
-  import ChannelsSidebar from './channels-sidebar.svelte';
+  import ChannelsSidebar from './channels-side.svelte';
 
   export type Niche = Procedures['niche_find_by_slug']['output'];
   let { slug, withNiche }: { slug: string; withNiche: Snippet<[{ niche: Niche }]> } = $props();
