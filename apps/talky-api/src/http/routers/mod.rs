@@ -1,7 +1,9 @@
 use std::{marker::PhantomData, path::PathBuf, sync::Arc};
 
 use authentication::create_authentication_router;
+use category::create_category_router;
 use channel::create_channel_router;
+use lobby::create_lobby_router;
 use niche::create_niche_router;
 use rspc::{Procedure, ProcedureBuilder, ResolverInput, ResolverOutput};
 
@@ -16,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 mod authentication;
+mod category;
 mod channel;
+mod lobby;
 mod niche;
 
 impl rspc::Error for AppError {
@@ -56,6 +60,8 @@ pub fn mount() -> Router<Ctx> {
         .merge(create_authentication_router())
         .merge(create_channel_router())
         .merge(create_niche_router())
+        .merge(create_lobby_router())
+        .merge(create_category_router())
 }
 
 pub fn timing_middleware<TError, TCtx, TInput, TResult>(

@@ -6,7 +6,6 @@ use specta::Type;
 
 use crate::{
     error::AppResult,
-    niche::service::NicheResource,
     pagination::{
         connection_from_repository, Cursor, ListResult, Model, Node, PaginationArgs, WithPagination,
     },
@@ -14,12 +13,12 @@ use crate::{
     DatabasePool,
 };
 
-use super::repository::{ChannelCursor, ChannelModel, ChannelRepository};
+use super::repository::{LobbyCursor, LobbyModel, LobbyRepository};
 
 #[derive(Type, Serialize, Deserialize, Default, Debug)]
-pub struct ListChannelMeta {}
+pub struct ListLobbyMeta {}
 
-impl WithPagination for ListChannelArgs {
+impl WithPagination for ListLobbyArgs {
     fn pagination(&self) -> PaginationArgs {
         PaginationArgs {
             before: self.before.clone(),
@@ -29,27 +28,27 @@ impl WithPagination for ListChannelArgs {
         }
     }
 
-    type Meta = ListChannelMeta;
-    type CursorType = ChannelCursor;
+    type Meta = ListLobbyMeta;
+    type CursorType = LobbyCursor;
 
     fn get_meta(&self) -> Self::Meta {
-        ListChannelMeta {}
+        ListLobbyMeta {}
     }
 
     fn to_cursor(&self, id: String) -> Self::CursorType {
         let mut cursor =
-            ChannelCursor::decode(&self.after.as_ref().map_or("", |v| v)).unwrap_or_default();
+            LobbyCursor::decode(&self.after.as_ref().map_or("", |v| v)).unwrap_or_default();
         cursor.id = id;
         cursor
     }
 }
 
-pub struct ChannelService {
-    repository: Arc<ChannelRepository>,
+pub struct LobbyService {
+    repository: Arc<LobbyRepository>,
 }
 
 #[derive(Type, Deserialize, Serialize, Debug)]
-pub struct ListChannelArgs {
+pub struct ListLobbyArgs {
     pub before: Option<String>,
     pub after: Option<String>,
     pub first: Option<i32>,
@@ -62,52 +61,47 @@ pub enum TemporaryContract {
     Expires { expires: i32 },
 }
 
-#[derive(Type, Serialize, Debug, Clone)]
-pub struct ChannelResource {
-    pub id: String,
+#[derive(Type, Deserialize, Serialize, Debug)]
+pub struct CreateLobbyArgs {
     pub name: String,
-    pub slug: String,
-    pub r#type: ChannelType,
-    pub niche_id: String,
-    // category_tree: Vec<String>,
+    pub channel_id: String,
 }
 
 #[derive(Type, Serialize, Debug, Clone)]
-pub struct ChannelCategoryResource {
+pub struct LobbyResource {
     pub id: String,
     pub name: String,
-    pub niche_id: String,
-    pub channels: Vec<ChannelResource>,
-    // category_tree: Vec<String>,
+    pub channel_id: String,
+    pub owner_user_id: String,
 }
 
 #[derive(PartialEq, sqlx::Type, Type, Serialize, Deserialize, Debug, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "channel_type", rename_all = "snake_case")]
-pub enum ChannelType {
+#[sqlx(type_name = "lobby_type", rename_all = "snake_case")]
+pub enum LobbyType {
     Chat,
     Feed,
     MultiMedia,
 }
 
-impl Node for ChannelCategoryResource {
+impl Node for LobbyResource {
     fn id(&self) -> String {
         self.name.clone()
     }
 }
 
-impl ChannelService {
+impl LobbyService {
     pub fn new(pool: DatabasePool) -> Self {
         Self {
-            repository: Arc::new(ChannelRepository::new(pool)),
+            repository: Arc::new(LobbyRepository::new(pool)),
         }
     }
 
-    pub async fn find_by_slug(&self, slug: String) -> AppResult<ChannelResource> {
-        Ok(self.repository.find_by_slug(slug).await?.to_node())
+    pub async fn create(&self, args: &CreateLobbyArgs, user_id: &str) -> AppResult<LobbyResource> {
+        Ok(self.repository.create(args, user_id).await?.to_node())
     }
 
-    pub async fn find_by_id(&self, id: String) -> AppResult<ChannelResource> {
+    pub async fn find_by_id(&self, id: String) -> AppResult<LobbyResource> {
         Ok(self.repository.find_by_id(id).await?.to_node())
     }
 }

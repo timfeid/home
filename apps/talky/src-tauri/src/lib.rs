@@ -6,7 +6,7 @@ mod signaling;
 mod utils;
 mod webrtc;
 
-use std::sync::Arc;
+use std::{env, sync::Arc};
 // use tauri::plugin_store::StoreExt;
 use tauri::{generate_context, generate_handler, Builder};
 use webrtc::WebRTCManager;
